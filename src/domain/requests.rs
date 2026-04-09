@@ -23,4 +23,8 @@ pub struct CreateRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestRecord {
     pub id: String,
+    pub title: String,
+    pub author: String,
+    pub media_type: MediaType,
+    pub preferred_language: Option<String>,
 }

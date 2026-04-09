@@ -20,7 +20,8 @@ impl SqliteRequestRepository {
     pub async fn create(&self, request: CreateRequest) -> Result<RequestRecord> {
         let id = Uuid::new_v4().to_string();
         let media_type = request.media_type.as_str();
-        let preferred_language = request.preferred_language;
+        let preferred_language = request.preferred_language.clone();
+        let mut tx = self.pool.begin().await?;
 
         sqlx::query(
             "INSERT INTO requests (id, title, author, media_type, preferred_language, state, created_at)
@@ -32,10 +33,11 @@ impl SqliteRequestRepository {
         .bind(media_type)
         .bind(preferred_language.as_deref())
         .bind("requested")
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         let payload_json = json!({
+            "request_id": id,
             "title": request.title,
             "author": request.author,
             "media_type": media_type,
@@ -50,10 +52,18 @@ impl SqliteRequestRepository {
         .bind(&id)
         .bind(RequestEventKind::Created.as_str())
         .bind(payload_json)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        Ok(RequestRecord { id })
+        tx.commit().await?;
+
+        Ok(RequestRecord {
+            id,
+            title: request.title,
+            author: request.author,
+            media_type: request.media_type,
+            preferred_language: request.preferred_language,
+        })
     }
 
     pub async fn events_for(&self, request_id: impl AsRef<str>) -> Result<Vec<RequestEventRecord>> {

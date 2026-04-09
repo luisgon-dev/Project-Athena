@@ -2,6 +2,7 @@ use book_router::{
     db::{connect_sqlite, repositories::SqliteRequestRepository},
     domain::requests::{CreateRequest, MediaType},
 };
+use serde_json::Value;
 
 #[tokio::test]
 async fn create_request_persists_initial_event() {
@@ -19,8 +20,16 @@ async fn create_request_persists_initial_event() {
         .await
         .unwrap();
 
-    let events = repo.events_for(request.id).await.unwrap();
+    let request_id = request.id.clone();
+    let events = repo.events_for(&request_id).await.unwrap();
+    let event_payload: Value = serde_json::from_str(&events[0].payload_json).unwrap();
 
+    assert_eq!(request.title, "The Hobbit");
+    assert_eq!(request.author, "J.R.R. Tolkien");
+    assert_eq!(request.media_type, MediaType::Audiobook);
+    assert_eq!(request.preferred_language.as_deref(), Some("en"));
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].kind.as_str(), "request.created");
+    assert_eq!(events[0].request_id, request_id);
+    assert_eq!(event_payload["request_id"], request_id);
 }
