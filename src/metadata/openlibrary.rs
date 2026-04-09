@@ -44,8 +44,8 @@ impl OpenLibraryClient {
                 normalize_text(&doc.title) == expected_title
                     && doc
                         .author_name
-                        .first()
-                        .is_some_and(|candidate| normalize_text(candidate) == expected_author)
+                        .iter()
+                        .any(|candidate| normalize_text(candidate) == expected_author)
             })
             .ok_or_else(|| anyhow::anyhow!("no work match"))?;
 
