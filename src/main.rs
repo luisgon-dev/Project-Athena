@@ -6,7 +6,7 @@ use tokio::net::TcpListener;
 async fn main() -> anyhow::Result<()> {
     let config = AppConfig::from_env()?;
     let listener = TcpListener::bind(&config.bind_addr).await?;
-    let app = build_app(config)?;
+    let app = build_app(config).await?;
 
     serve(listener, app).await?;
     Ok(())

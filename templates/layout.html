@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Book Router{% endblock %}</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 2rem;
+        background: #f7f5f1;
+        color: #1f1f1f;
+      }
+      main {
+        max-width: 52rem;
+        margin: 0 auto;
+        background: white;
+        padding: 2rem;
+        border-radius: 1rem;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+      }
+      label {
+        display: block;
+        margin-top: 1rem;
+        font-weight: 600;
+      }
+      input, select {
+        width: 100%;
+        margin-top: 0.4rem;
+        padding: 0.7rem 0.8rem;
+        border: 1px solid #cfc7bc;
+        border-radius: 0.5rem;
+      }
+      button {
+        margin-top: 1.25rem;
+        padding: 0.8rem 1rem;
+        border: 0;
+        border-radius: 0.6rem;
+        background: #1f1f1f;
+        color: white;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

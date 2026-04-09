@@ -8,10 +8,15 @@ use tower::util::ServiceExt;
 #[tokio::test]
 async fn health_returns_ok() {
     let config = AppConfig::for_tests();
-    let app = build_app(config).unwrap();
+    let app = build_app(config).await.unwrap();
 
     let response = app
-        .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 

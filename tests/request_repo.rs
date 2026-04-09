@@ -1,6 +1,6 @@
 use book_router::{
     db::{connect_sqlite, repositories::SqliteRequestRepository},
-    domain::requests::{CreateRequest, MediaType},
+    domain::requests::{CreateRequest, ManifestationPreference, MediaType},
 };
 use serde_json::Value;
 
@@ -16,6 +16,7 @@ async fn create_request_persists_initial_event() {
             author: "J.R.R. Tolkien".into(),
             media_type: MediaType::Audiobook,
             preferred_language: Some("en".into()),
+            manifestation: ManifestationPreference::default(),
         })
         .await
         .unwrap();
