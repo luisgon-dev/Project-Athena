@@ -27,4 +27,6 @@ pub struct RequestRecord {
     pub author: String,
     pub media_type: MediaType,
     pub preferred_language: Option<String>,
+    pub state: String,
+    pub created_at: String,
 }

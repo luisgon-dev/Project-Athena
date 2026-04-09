@@ -55,14 +55,29 @@ impl SqliteRequestRepository {
         .execute(&mut *tx)
         .await?;
 
+        let row = sqlx::query(
+            "SELECT id, title, author, media_type, preferred_language, state, created_at
+             FROM requests
+             WHERE id = ?",
+        )
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
+
         tx.commit().await?;
 
         Ok(RequestRecord {
-            id,
-            title: request.title,
-            author: request.author,
-            media_type: request.media_type,
-            preferred_language: request.preferred_language,
+            id: row.get::<String, _>("id"),
+            title: row.get::<String, _>("title"),
+            author: row.get::<String, _>("author"),
+            media_type: match row.get::<String, _>("media_type").as_str() {
+                "ebook" => crate::domain::requests::MediaType::Ebook,
+                "audiobook" => crate::domain::requests::MediaType::Audiobook,
+                other => anyhow::bail!("unknown media type stored in requests: {other}"),
+            },
+            preferred_language: row.get::<Option<String>, _>("preferred_language"),
+            state: row.get::<String, _>("state"),
+            created_at: row.get::<String, _>("created_at"),
         })
     }
 
