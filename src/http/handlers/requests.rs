@@ -42,9 +42,9 @@ pub async fn create_request(
             media_type,
             preferred_language: form.preferred_language,
             manifestation: ManifestationPreference {
-                edition_title: form.edition_title,
-                preferred_narrator: form.preferred_narrator,
-                preferred_publisher: form.preferred_publisher,
+                edition_title: normalize_optional_text(form.edition_title),
+                preferred_narrator: normalize_optional_text(form.preferred_narrator),
+                preferred_publisher: normalize_optional_text(form.preferred_publisher),
                 graphic_audio: form.graphic_audio.is_some(),
             },
         })
@@ -70,4 +70,14 @@ pub async fn show_request(
     Ok(render(RequestsShowTemplate {
         request: RequestDetailView::from(request),
     }))
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    })
 }
