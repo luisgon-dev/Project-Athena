@@ -11,9 +11,14 @@ pub struct OpenLibraryClient {
 
 impl OpenLibraryClient {
     pub fn new(base_url: impl Into<String>) -> Self {
+        let http = reqwest::Client::builder()
+            .user_agent("book-router/0.1")
+            .build()
+            .expect("reqwest client");
+
         Self {
             base_url: base_url.into(),
-            http: reqwest::Client::new(),
+            http,
         }
     }
 
@@ -30,10 +35,18 @@ impl OpenLibraryClient {
             .error_for_status()?;
 
         let payload: SearchResponse = response.json().await?;
+        let expected_title = normalize_text(title);
+        let expected_author = normalize_text(author);
         let first = payload
             .docs
             .into_iter()
-            .next()
+            .find(|doc| {
+                normalize_text(&doc.title) == expected_title
+                    && doc
+                        .author_name
+                        .first()
+                        .is_some_and(|candidate| normalize_text(candidate) == expected_author)
+            })
             .ok_or_else(|| anyhow::anyhow!("no work match"))?;
 
         Ok(ResolvedWork {
@@ -57,4 +70,12 @@ struct SearchDoc {
     title: String,
     #[serde(default)]
     author_name: Vec<String>,
+}
+
+fn normalize_text(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
