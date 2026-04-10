@@ -10,10 +10,13 @@ use crate::{
     app::AppState,
     db::repositories::SqliteRequestRepository,
     domain::requests::{CreateRequest, ManifestationPreference, MediaType},
-    http::views::{
-        CreatedRequestView, RequestDetailView, RequestListView, RequestSearchView,
-        RequestsCreatedTemplate, RequestsIndexTemplate, RequestsNewTemplate, RequestsShowTemplate,
-        WorkMatchView, render,
+    http::{
+        error::AppError,
+        views::{
+            CreatedRequestView, RequestDetailView, RequestListView, RequestSearchView,
+            RequestsCreatedTemplate, RequestsIndexTemplate, RequestsNewTemplate, RequestsShowTemplate,
+            WorkMatchView, render,
+        },
     },
 };
 
@@ -35,12 +38,11 @@ pub struct CreateRequestForm {
     pub graphic_audio: Option<String>,
 }
 
-pub async fn requests_index(State(state): State<AppState>) -> Result<Html<String>, StatusCode> {
+pub async fn requests_index(State(state): State<AppState>) -> Result<Html<String>, AppError> {
     let repo = SqliteRequestRepository::new(state.pool);
     let requests = repo
         .list()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .await?
         .into_iter()
         .map(RequestListView::from)
         .collect();
@@ -51,18 +53,12 @@ pub async fn requests_index(State(state): State<AppState>) -> Result<Html<String
 pub async fn new_request(
     State(state): State<AppState>,
     Query(search): Query<RequestSearchQuery>,
-) -> Result<Html<String>, StatusCode> {
+) -> Result<Html<String>, AppError> {
     let title = search.title.unwrap_or_default();
     let author = search.author.unwrap_or_default();
     let has_searched = !(title.trim().is_empty() && author.trim().is_empty());
     let (search, matches) = if has_searched {
-        let works = match state.open_library.search_works(&title, &author).await {
-            Ok(works) => works,
-            Err(error) => {
-                warn!(%title, %author, error = %error, "metadata search failed");
-                return Err(StatusCode::BAD_GATEWAY);
-            }
-        };
+        let works = state.open_library.search_works(&title, &author).await?;
         (
             RequestSearchView { title, author },
             works.works.into_iter().map(WorkMatchView::from).collect(),
@@ -81,36 +77,19 @@ pub async fn new_request(
 pub async fn create_request(
     State(state): State<AppState>,
     Form(form): Form<CreateRequestForm>,
-) -> Result<(StatusCode, Html<String>), StatusCode> {
-    let selected_work_id = match normalize_optional_text(form.selected_work_id) {
-        Some(selected_work_id) => selected_work_id,
-        None => {
-            warn!("request creation rejected: missing selected_work_id");
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    };
-    let selected_work = match state
+) -> Result<(StatusCode, Html<String>), AppError> {
+    let selected_work_id = normalize_optional_text(form.selected_work_id)
+        .ok_or_else(|| AppError::BadRequest("missing selected_work_id".to_string()))?;
+
+    let selected_work = state
         .open_library
         .resolve_work_by_id(&selected_work_id)
-        .await
-    {
-        Ok(Some(resolved)) => resolved.work,
-        Ok(None) => {
-            warn!(%selected_work_id, "request creation rejected: selected work id not found");
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        Err(error) => {
-            warn!(%selected_work_id, error = %error, "request creation failed during work resolution");
-            return Err(StatusCode::BAD_GATEWAY);
-        }
-    };
-    let media_types = match parse_media_types(form.ebook.is_some(), form.audiobook.is_some()) {
-        Ok(media_types) => media_types,
-        Err(status) => {
-            warn!(%selected_work_id, "request creation rejected: no media types selected");
-            return Err(status);
-        }
-    };
+        .await?
+        .ok_or_else(|| AppError::BadRequest("selected work id not found".to_string()))?
+        .work;
+
+    let media_types = parse_media_types(form.ebook.is_some(), form.audiobook.is_some())?;
+
     let repo = SqliteRequestRepository::new(state.pool);
     let manifestation = ManifestationPreference {
         edition_title: normalize_optional_text(form.edition_title),
@@ -133,11 +112,7 @@ pub async fn create_request(
                 })
                 .collect(),
         )
-        .await
-        .map_err(|error| {
-            warn!(%selected_work_id, error = %error, "request creation failed while persisting requests");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        .await?
         .into_iter()
         .map(CreatedRequestView::from)
         .collect();
@@ -153,15 +128,12 @@ pub async fn create_request(
 pub async fn show_request(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Html<String>, StatusCode> {
+) -> Result<Html<String>, AppError> {
     let repo = SqliteRequestRepository::new(state.pool);
-    let Some(request) = repo
+    let request = repo
         .find_by_id(&id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    else {
-        return Err(StatusCode::NOT_FOUND);
-    };
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("Request with ID {} not found", id)))?;
 
     Ok(render(RequestsShowTemplate {
         request: RequestDetailView::from(request),
@@ -179,7 +151,7 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
     })
 }
 
-fn parse_media_types(ebook: bool, audiobook: bool) -> Result<Vec<MediaType>, StatusCode> {
+fn parse_media_types(ebook: bool, audiobook: bool) -> Result<Vec<MediaType>, AppError> {
     let mut media_types = Vec::with_capacity(2);
     if ebook {
         media_types.push(MediaType::Ebook);
@@ -189,7 +161,7 @@ fn parse_media_types(ebook: bool, audiobook: bool) -> Result<Vec<MediaType>, Sta
     }
 
     if media_types.is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(AppError::BadRequest("no media types selected".to_string()));
     }
 
     Ok(media_types)

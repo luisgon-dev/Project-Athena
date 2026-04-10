@@ -685,6 +685,40 @@ async fn request_survives_app_rebuild_with_same_config() {
 }
 
 #[tokio::test]
+async fn get_requests_new_returns_json_error_on_metadata_timeout() {
+    let server = MockServer::start().await;
+    let app = build_app(
+        AppConfig::for_tests()
+            .with_metadata_base_url(server.uri())
+            .with_cover_base_url(server.uri()),
+    )
+    .await
+    .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/search.json"))
+        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(11)))
+        .mount(&server)
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests/new?title=Timeout")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+    let body = body_text(response).await;
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["error"], "Metadata service timed out");
+}
+
+#[tokio::test]
 async fn build_app_backfills_missing_canonical_work_identity_for_legacy_requests() {
     let tempdir = tempfile::tempdir().unwrap();
     let server = MockServer::start().await;
