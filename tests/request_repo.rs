@@ -1,4 +1,5 @@
 use book_router::{
+    config::DatabaseTarget,
     db::{connect_sqlite, repositories::SqliteRequestRepository},
     domain::requests::{CreateRequest, ManifestationPreference, MediaType},
 };
@@ -6,7 +7,7 @@ use serde_json::Value;
 
 #[tokio::test]
 async fn create_request_persists_initial_event() {
-    let pool = connect_sqlite("sqlite::memory:").await.unwrap();
+    let pool = connect_sqlite(&DatabaseTarget::memory()).await.unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     let repo = SqliteRequestRepository::new(pool);
 

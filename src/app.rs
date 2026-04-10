@@ -11,7 +11,7 @@ use crate::{
 
 pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
     config.validate()?;
-    let pool = connect_sqlite("sqlite::memory:").await?;
+    let pool = connect_sqlite(&config.database).await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     Ok(Router::new()
