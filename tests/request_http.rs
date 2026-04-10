@@ -59,29 +59,32 @@ async fn post_requests_creates_a_work_level_request() {
 async fn request_survives_app_rebuild_with_same_config() {
     let tempdir = tempfile::tempdir().unwrap();
     let config = AppConfig::for_tests_with_database_path(tempdir.path().join("book-router.sqlite"));
-    let app = build_app(config.clone()).await.unwrap();
+    let location = {
+        let app = build_app(config.clone()).await.unwrap();
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/requests")
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from(
-                    "title=The+Hobbit&author=J.R.R.+Tolkien&media_type=audiobook&preferred_language=en&edition_title=&preferred_narrator=Andy+Serkis&preferred_publisher=",
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/requests")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(
+                        "title=The+Hobbit&author=J.R.R.+Tolkien&media_type=audiobook&preferred_language=en&edition_title=&preferred_narrator=Andy+Serkis&preferred_publisher=",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
-    assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    let location = response
-        .headers()
-        .get(LOCATION)
-        .and_then(|value| value.to_str().ok())
-        .expect("redirect location header");
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        response
+            .headers()
+            .get(LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .expect("redirect location header")
+            .to_owned()
+    };
 
     let rebuilt_app = build_app(config).await.unwrap();
     let detail = rebuilt_app

@@ -37,3 +37,17 @@ async fn create_request_persists_initial_event() {
     assert_eq!(events[0].request_id, request_id);
     assert_eq!(event_payload["request_id"], request_id);
 }
+
+#[tokio::test]
+async fn connect_sqlite_creates_parent_directory_for_file_databases() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let database_path = tempdir.path().join("nested/state/book-router.sqlite");
+
+    let pool = connect_sqlite(&DatabaseTarget::file(&database_path))
+        .await
+        .unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+    assert!(database_path.exists());
+    assert!(database_path.parent().unwrap().exists());
+}
