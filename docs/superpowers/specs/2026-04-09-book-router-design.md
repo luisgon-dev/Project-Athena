@@ -1,13 +1,13 @@
 # Book Router Design
 
 Date: 2026-04-09
-Status: Draft approved in conversation, written for review
+Status: Approved and revised on 2026-04-10
 
 ## Summary
 
 This document defines the first production version of a lightweight, Docker-first Rust application that replaces the request-routing and import portions of Readarr for books and audiobooks.
 
-The system owns canonical identity and metadata from day one. It accepts requests, searches indexers through Prowlarr and/or direct indexer integrations, ranks release candidates, auto-sends only high-confidence matches to qBittorrent, imports completed downloads into `/ebooks` or `/audiobooks`, and then syncs outward to Calibre and Audiobookshelf.
+The system owns canonical identity and metadata from day one. It accepts metadata-backed requests, searches indexers through Prowlarr and/or direct indexer integrations, ranks release candidates, auto-sends only high-confidence matches to qBittorrent, imports completed downloads into `/ebooks` or `/audiobooks`, and then syncs outward to Calibre and Audiobookshelf.
 
 The application is not a full library manager in v1. It is a request, acquisition, metadata, and import engine with admin-first workflows and a future path toward external request integrations such as Discord.
 
@@ -36,7 +36,7 @@ The application is not a full library manager in v1. It is a request, acquisitio
 - Database: SQLite as the default and only required v1 database
 - Media support: ebooks and audiobooks from day one
 - Ownership: the new app is the source of truth for request, identity, import, and metadata state
-- Request model: work-first requests with optional pinning to a specific edition or recording
+- Request model: metadata-first, work-backed requests with optional manifestation preferences or later pinning to a specific edition or recording
 - Acquisition policy: auto-send to qBittorrent only above a strict confidence threshold
 - Search strategy: support both Prowlarr and direct indexers from the same ranking pipeline
 - Download support: design for torrent and NZB clients, implement qBittorrent first
@@ -137,11 +137,12 @@ The application uses a two-layer identity model: conceptual works and concrete m
 
 ### Identity Rules
 
-1. Requests default to work-level intent.
-2. Requests can be pinned to a specific manifestation when the admin wants a precise edition or recording.
-3. A manifestation may be partially specified when the provider data is incomplete.
-4. The application may still auto-acquire an unpinned request if the result strongly matches the work and declared preferences.
-5. A weak single signal must never define canonical identity on its own.
+1. Requests must be created from a provider-backed work match rather than free-text alone.
+2. Requests default to work-level intent after the admin selects a matched work from the metadata provider.
+3. Requests can be pinned to a specific manifestation when the admin wants a precise edition or recording.
+4. A manifestation may be partially specified when the provider data is incomplete.
+5. The application may still auto-acquire an unpinned request if the result strongly matches the work and declared preferences.
+6. A weak single signal must never define canonical identity on its own.
 
 ## Metadata Strategy
 
@@ -172,6 +173,48 @@ The admin must be able to:
 - mark a release as permanently blocked for a request or globally
 
 Overrides must be stored explicitly so future refresh jobs do not silently undo them.
+
+## Request Creation Contract
+
+Request creation is metadata-first.
+
+The request window should not create requests directly from raw title and author text. Instead it should:
+
+1. accept title and author search terms
+2. query the metadata provider, currently Open Library
+3. present matched works
+4. require the admin to select one canonical work before a request can be created
+5. allow the admin to choose `ebook`, `audiobook`, or both
+6. allow optional manifestation preferences before submission:
+   - preferred language
+   - edition title
+   - preferred narrator
+   - preferred publisher
+   - graphic audio preference
+
+### No-Match Rule
+
+If no metadata-provider match is found, no request can be created. There is no free-text fallback request path in v1.
+
+### Dual-Media Convenience
+
+If the admin selects both `ebook` and `audiobook`, the system should create two separate requests linked to the same canonical work. This is a convenience action, not a combined polymorphic request.
+
+### Partial Validation Rule
+
+If both media types are selected but only one side is valid, the system should create only the valid request and explain why the other one was skipped.
+
+### Request Window UX Shape
+
+The preferred v1 request UX is a lightweight metadata-first wizard:
+
+1. Search for a work
+2. Select a matched work
+3. Choose one or both media types
+4. Add optional manifestation preferences
+5. Create one or two requests
+
+This keeps metadata identity at the front of the workflow and prevents raw, unresolved requests from entering the system.
 
 ## Search And Ranking
 
@@ -319,7 +362,7 @@ The sync layer should be abstract enough to support:
 The first UI is admin-only and should focus on operational clarity rather than broad product surface.
 
 Core screens:
-- request creation
+- metadata search and request creation
 - request detail and lifecycle
 - search result review
 - import queue and failures
@@ -334,7 +377,7 @@ The API should be designed from day one to allow future integrations such as:
 - webhook-driven request sources
 - third-party request portals
 
-These are explicitly scoped after v1, but request creation and status endpoints should not require redesign to support them.
+These are explicitly scoped after v1, but request creation and status endpoints should not require redesign to support them. External request sources should also follow the same metadata-first contract rather than creating unresolved free-text requests.
 
 ## Configuration
 
@@ -457,13 +500,14 @@ These are intentionally deferred rather than left ambiguous:
 
 The implementation should start with the smallest end-to-end slice that proves the hardest system behaviors:
 
-1. request creation for a work plus media type
-2. metadata resolution from Open Library
-3. one search path through Prowlarr
-4. candidate scoring and review queue
-5. qBittorrent dispatch
-6. import into `/ebooks` and `/audiobooks`
-7. event history and audit trail
+1. persistent SQLite-backed request storage
+2. metadata search and work selection from Open Library
+3. metadata-backed request creation for one or both media types
+4. one search path through Prowlarr
+5. candidate scoring and review queue
+6. qBittorrent dispatch
+7. import into `/ebooks` and `/audiobooks`
+8. event history and audit trail
 
 Direct indexers, Calibre sync, Audiobookshelf sync, richer manifestation pinning, and external request integrations should layer onto that first vertical slice.
 
@@ -471,15 +515,16 @@ Direct indexers, Calibre sync, Audiobookshelf sync, richer manifestation pinning
 
 The first release is successful if an admin can:
 
-1. create an ebook or audiobook request
-2. specify optional edition or recording preferences
-3. search via Prowlarr and/or direct indexers
-4. have the system auto-send only high-confidence candidates to qBittorrent
-5. review and approve uncertain candidates manually
-6. import completed downloads into the correct media root
-7. inspect why a decision was made
-8. correct metadata when the automatic path is wrong
-9. sync imported items outward to Calibre and Audiobookshelf without surrendering canonical ownership
+1. search the metadata provider and select a canonical work
+2. create an ebook request, an audiobook request, or both from that selected work
+3. specify optional edition or recording preferences before request submission
+4. search via Prowlarr and/or direct indexers
+5. have the system auto-send only high-confidence candidates to qBittorrent
+6. review and approve uncertain candidates manually
+7. import completed downloads into the correct media root
+8. inspect why a decision was made
+9. correct metadata when the automatic path is wrong
+10. sync imported items outward to Calibre and Audiobookshelf without surrendering canonical ownership
 
 ## Risks And Mitigations
 

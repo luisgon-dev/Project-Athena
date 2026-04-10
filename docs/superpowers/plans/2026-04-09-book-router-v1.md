@@ -10,6 +10,52 @@
 
 ---
 
+## Progress Snapshot As Of 2026-04-10
+
+Merged on `main` today:
+
+- foundation app bootstrap and `/health`
+- SQLite migration plus request and event persistence
+- Open Library work resolution
+- admin request UI/API scaffold
+
+Important current limitation:
+
+- the app still creates an in-memory SQLite database at startup, so requests do not survive process restarts
+
+Approved scope revision:
+
+- the merged request UI is now a transitional scaffold
+- request creation must be metadata-first:
+  - search metadata first
+  - select a canonical work
+  - choose `ebook`, `audiobook`, or both
+  - optionally refine manifestation preferences
+  - create one or two requests only from a metadata-backed match
+- there is no free-text fallback request path in v1
+
+## Revised Immediate Next Milestone
+
+Before continuing with Prowlarr or download work, implement this milestone:
+
+1. persistent SQLite configuration and file-backed startup
+2. metadata-first request window
+3. canonical work linkage in stored requests
+4. dual-media convenience creation from one selected work
+5. validation that creates only valid media-type requests when both are selected
+
+This is now the recommended next execution order:
+
+1. Make SQLite persistent across restarts
+2. Replace free-text request creation with metadata search then request creation
+3. Add Prowlarr search
+4. Add direct Torznab search
+5. Add candidate scoring and review queue
+6. Add qBittorrent dispatch
+7. Add import classification and final move planning
+8. Add Calibre and Audiobookshelf sync
+9. Add Docker packaging and end-to-end harness coverage
+
 ## File Structure
 
 Create these files and keep responsibilities narrow:
@@ -476,6 +522,9 @@ git commit -m "feat: resolve works from open library"
 
 ## Task 4: Build The Admin Request UI And API With Optional Manifestation Preferences
 
+Status note:
+This task has been merged as an initial scaffold, but its original free-text request entry path is now superseded by the approved metadata-first request contract. Treat the current implementation as temporary and use Task 4A to replace it.
+
 **Files:**
 - Create: `src/http/handlers/requests.rs`
 - Create: `src/http/views.rs`
@@ -564,6 +613,41 @@ Expected: PASS with a redirect to the request detail page.
 git add src/http templates src/domain/requests.rs tests/request_http.rs Cargo.toml
 git commit -m "feat: add admin request ui and api"
 ```
+
+## Task 4A: Replace Free-Text Request Creation With Metadata-First Request Flow
+
+**Why this task exists:**
+The approved design was revised after the initial Task 4 scaffold landed. Requests must now be created only from metadata-provider matches, not from free-text title and author submission.
+
+**Files:**
+- Modify: `src/app.rs`
+- Modify: `src/config.rs`
+- Modify: `src/db/repositories.rs`
+- Modify: `src/domain/catalog.rs`
+- Modify: `src/domain/requests.rs`
+- Modify: `src/http/handlers/requests.rs`
+- Modify: `src/http/views.rs`
+- Modify: `templates/requests/index.html`
+- Modify: `templates/requests/show.html`
+- Create: `tests/request_metadata_flow.rs`
+
+### Goals
+
+- add a metadata search step to the request window
+- require work selection before request creation
+- allow `ebook`, `audiobook`, or both from one selected work
+- create separate requests when both media types are chosen
+- refuse request creation when metadata search finds no acceptable match
+- persist canonical work identity with the request instead of free-text-only intent
+
+### Suggested Verification Targets
+
+- searching metadata returns matched works
+- submitting a selected work plus `ebook` creates one request
+- submitting a selected work plus `audiobook` creates one request
+- submitting both creates two requests linked to the same work
+- if one media type is invalid, only the valid request is created and the UI explains the skipped side
+- restarting the app preserves requests after persistent SQLite is added
 
 ## Task 5: Implement Prowlarr Search And Candidate Normalization
 
@@ -1126,9 +1210,9 @@ git commit -m "docs: add design and implementation plan"
 ## Spec Coverage Check
 
 - Product goals: covered by Tasks 1 through 11, with the end-to-end flow in Task 11 verifying the request-to-import path.
-- SQLite default: Task 2 establishes SQLite persistence and migration flow.
+- SQLite default: Task 2 establishes SQLite persistence and migration flow, and the revised immediate milestone adds persistent file-backed startup.
 - Open Library primary metadata: Task 3 implements the primary metadata provider.
-- Admin-only v1 UI/API: Task 4 creates the request UI and API.
+- Admin-only v1 UI/API: Task 4 creates the initial scaffold, and Task 4A revises it into the approved metadata-first request flow.
 - Prowlarr plus direct indexers: Tasks 5 and 6 implement both search paths.
 - Confidence scoring and review queue: Task 7 implements weighted scoring and explanation strings.
 - qBittorrent first: Task 8 implements the first download client.
@@ -1141,4 +1225,3 @@ git commit -m "docs: add design and implementation plan"
 - Placeholder scan: no `TODO`, `TBD`, or deferred implementation steps remain inside the numbered tasks.
 - Type consistency: `CreateRequest`, `ManifestationPreference`, `ReleaseCandidate`, and the adapter names are reused consistently across tasks.
 - Scope check: the plan remains within the approved `v1` scope and intentionally does not include public accounts, first-class Discord bots, or NZB client implementation.
-
