@@ -1,0 +1,15 @@
+{% extends "layout.html" %}
+
+{% block title %}Created Requests{% endblock %}
+
+{% block content %}
+<h1>Created requests</h1>
+<ul>
+  {% for request in requests %}
+  <li>
+    <a href="/requests/{{ request.id }}">{{ request.title }}</a>
+    by {{ request.author }} ({{ request.media_type_label }})
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

@@ -1,7 +1,10 @@
 use askama::Template;
 use axum::response::Html;
 
-use crate::domain::requests::{MediaType, RequestRecord};
+use crate::domain::{
+    catalog::WorkRecord,
+    requests::{MediaType, RequestRecord},
+};
 
 pub fn render<T: Template>(template: T) -> Html<String> {
     Html(
@@ -62,12 +65,67 @@ impl From<RequestRecord> for RequestDetailView {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RequestSearchView {
+    pub title: String,
+    pub author: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkMatchView {
+    pub selection_value: String,
+    pub title: String,
+    pub author: String,
+}
+
+impl From<WorkRecord> for WorkMatchView {
+    fn from(work: WorkRecord) -> Self {
+        Self {
+            selection_value: format!(
+                "{}|{}|{}",
+                work.external_id, work.title, work.primary_author
+            ),
+            title: work.title,
+            author: work.primary_author,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CreatedRequestView {
+    pub id: String,
+    pub title: String,
+    pub author: String,
+    pub media_type_label: &'static str,
+}
+
+impl From<RequestRecord> for CreatedRequestView {
+    fn from(record: RequestRecord) -> Self {
+        Self {
+            id: record.id,
+            title: record.title,
+            author: record.author,
+            media_type_label: media_type_label(&record.media_type),
+        }
+    }
+}
+
 #[derive(Template)]
 #[template(path = "requests/index.html")]
-pub struct RequestsIndexTemplate;
+pub struct RequestsIndexTemplate {
+    pub search: RequestSearchView,
+    pub matches: Vec<WorkMatchView>,
+    pub has_searched: bool,
+}
 
 #[derive(Template)]
 #[template(path = "requests/show.html")]
 pub struct RequestsShowTemplate {
     pub request: RequestDetailView,
+}
+
+#[derive(Template)]
+#[template(path = "requests/created.html")]
+pub struct RequestsCreatedTemplate {
+    pub requests: Vec<CreatedRequestView>,
 }

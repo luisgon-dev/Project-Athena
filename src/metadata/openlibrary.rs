@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::domain::catalog::{ResolvedWork, WorkRecord};
+use crate::domain::catalog::{ResolvedWork, WorkRecord, WorkSearch};
 
 #[derive(Clone)]
 pub struct OpenLibraryClient {
@@ -22,23 +22,27 @@ impl OpenLibraryClient {
         }
     }
 
-    pub async fn resolve_work(&self, title: &str, author: &str) -> Result<ResolvedWork> {
-        let response = self
-            .http
-            .get(format!(
-                "{}/search.json",
-                self.base_url.trim_end_matches('/')
-            ))
-            .query(&[("title", title), ("author", author), ("limit", "5")])
-            .send()
+    pub async fn search_works(&self, title: &str, author: &str) -> Result<WorkSearch> {
+        let works = self
+            .fetch_search_docs(title, author, "10")
             .await?
-            .error_for_status()?;
+            .into_iter()
+            .map(|doc| WorkRecord {
+                external_id: doc.key,
+                title: doc.title,
+                primary_author: doc.author_name.into_iter().next().unwrap_or_default(),
+            })
+            .collect();
 
-        let payload: SearchResponse = response.json().await?;
+        Ok(WorkSearch { works })
+    }
+
+    pub async fn resolve_work(&self, title: &str, author: &str) -> Result<ResolvedWork> {
         let expected_title = normalize_text(title);
         let expected_author = normalize_text(author);
-        let first = payload
-            .docs
+        let first = self
+            .fetch_search_docs(title, author, "5")
+            .await?
             .into_iter()
             .find(|doc| {
                 normalize_text(&doc.title) == expected_title
@@ -56,6 +60,22 @@ impl OpenLibraryClient {
                 primary_author: first.author_name.into_iter().next().unwrap_or_default(),
             },
         })
+    }
+
+    async fn fetch_search_docs(&self, title: &str, author: &str, limit: &str) -> Result<Vec<SearchDoc>> {
+        let response = self
+            .http
+            .get(format!(
+                "{}/search.json",
+                self.base_url.trim_end_matches('/')
+            ))
+            .query(&[("title", title), ("author", author), ("limit", limit)])
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let payload: SearchResponse = response.json().await?;
+        Ok(payload.docs)
     }
 }
 

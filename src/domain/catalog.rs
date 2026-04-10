@@ -9,3 +9,8 @@ pub struct WorkRecord {
 pub struct ResolvedWork {
     pub work: WorkRecord,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkSearch {
+    pub works: Vec<WorkRecord>,
+}

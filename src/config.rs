@@ -36,6 +36,7 @@ pub struct AppConfig {
     pub ebooks_root: PathBuf,
     pub audiobooks_root: PathBuf,
     pub database: DatabaseTarget,
+    pub metadata_base_url: String,
 }
 
 impl AppConfig {
@@ -49,6 +50,7 @@ impl AppConfig {
             ebooks_root: "/ebooks".into(),
             audiobooks_root: "/audiobooks".into(),
             database: DatabaseTarget::memory(),
+            metadata_base_url: "https://openlibrary.org".into(),
         }
     }
 
@@ -72,6 +74,8 @@ impl AppConfig {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("/audiobooks")),
             database: DatabaseTarget::from_env_path(get("DATABASE_PATH")),
+            metadata_base_url: get("METADATA_BASE_URL")
+                .unwrap_or_else(|| "https://openlibrary.org".into()),
         };
 
         config.validate()?;
@@ -91,7 +95,16 @@ impl AppConfig {
             }
         }
 
+        if self.metadata_base_url.trim().is_empty() {
+            anyhow::bail!("metadata base url must not be empty");
+        }
+
         Ok(())
+    }
+
+    pub fn with_metadata_base_url(mut self, value: impl Into<String>) -> Self {
+        self.metadata_base_url = value.into();
+        self
     }
 }
 
@@ -108,6 +121,7 @@ mod tests {
             "EBOOKS_ROOT" => Some("/var/lib/books".into()),
             "AUDIOBOOKS_ROOT" => Some("/var/lib/audiobooks".into()),
             "DATABASE_PATH" => Some("/var/lib/book-router/book-router.sqlite".into()),
+            "METADATA_BASE_URL" => Some("https://metadata.example.test".into()),
             _ => None,
         })
         .unwrap();
@@ -115,6 +129,7 @@ mod tests {
         assert_eq!(config.bind_addr, "127.0.0.1:7777");
         assert_eq!(config.ebooks_root, PathBuf::from("/var/lib/books"));
         assert_eq!(config.audiobooks_root, PathBuf::from("/var/lib/audiobooks"));
+        assert_eq!(config.metadata_base_url, "https://metadata.example.test");
         assert!(matches!(
             config.database,
             DatabaseTarget::File(ref path)

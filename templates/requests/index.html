@@ -3,20 +3,47 @@
 {% block title %}Admin Requests{% endblock %}
 
 {% block content %}
-<h1>New request</h1>
-<form method="post" action="/requests">
+<h1>Request a book</h1>
+<p>Search for a known work first, then choose the media types and preferences for the request.</p>
+
+<form method="get" action="/requests">
   <label>Title
-    <input name="title" value="The Hobbit">
+    <input name="title" value="{{ search.title }}">
   </label>
   <label>Author
-    <input name="author" value="J.R.R. Tolkien">
+    <input name="author" value="{{ search.author }}">
   </label>
-  <label>Media type
-    <select name="media_type">
-      <option value="ebook">Ebook</option>
-      <option value="audiobook" selected>Audiobook</option>
-    </select>
-  </label>
+  <button type="submit">Search metadata</button>
+</form>
+
+{% if has_searched %}
+<h2>Search results</h2>
+{% if matches.len() == 0 %}
+<p>No works matched that search.</p>
+{% else %}
+<form method="post" action="/requests">
+  <fieldset>
+    <legend>Select a matched work</legend>
+    {% for work in matches %}
+    <label class="choice">
+      <input type="radio" name="selected_work" value="{{ work.selection_value }}">
+      <span>{{ work.title }} by {{ work.author }}</span>
+    </label>
+    {% endfor %}
+  </fieldset>
+
+  <fieldset>
+    <legend>Media types</legend>
+    <label class="choice">
+      <input type="checkbox" name="ebook">
+      <span>Ebook</span>
+    </label>
+    <label class="choice">
+      <input type="checkbox" name="audiobook">
+      <span>Audiobook</span>
+    </label>
+  </fieldset>
+
   <label>Preferred language
     <input name="preferred_language" value="en">
   </label>
@@ -29,10 +56,12 @@
   <label>Preferred publisher
     <input name="preferred_publisher">
   </label>
-  <label>
+  <label class="choice">
     <input type="checkbox" name="graphic_audio">
-    Graphic audio
+    <span>Graphic audio</span>
   </label>
   <button type="submit">Create request</button>
 </form>
+{% endif %}
+{% endif %}
 {% endblock %}
