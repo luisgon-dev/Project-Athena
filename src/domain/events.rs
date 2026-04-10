@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RequestEventKind {

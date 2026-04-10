@@ -11,8 +11,9 @@ use crate::{
     db::repositories::SqliteRequestRepository,
     domain::requests::{CreateRequest, ManifestationPreference, MediaType},
     http::views::{
-        CreatedRequestView, RequestDetailView, RequestSearchView, RequestsCreatedTemplate,
-        RequestsIndexTemplate, RequestsShowTemplate, WorkMatchView, render,
+        CreatedRequestView, RequestDetailView, RequestListView, RequestSearchView,
+        RequestsCreatedTemplate, RequestsIndexTemplate, RequestsNewTemplate, RequestsShowTemplate,
+        WorkMatchView, render,
     },
 };
 
@@ -34,7 +35,20 @@ pub struct CreateRequestForm {
     pub graphic_audio: Option<String>,
 }
 
-pub async fn requests_index(
+pub async fn requests_index(State(state): State<AppState>) -> Result<Html<String>, StatusCode> {
+    let repo = SqliteRequestRepository::new(state.pool);
+    let requests = repo
+        .list()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .into_iter()
+        .map(RequestListView::from)
+        .collect();
+
+    Ok(render(RequestsIndexTemplate { requests }))
+}
+
+pub async fn new_request(
     State(state): State<AppState>,
     Query(search): Query<RequestSearchQuery>,
 ) -> Result<Html<String>, StatusCode> {
@@ -42,25 +56,22 @@ pub async fn requests_index(
     let author = search.author.unwrap_or_default();
     let has_searched = !(title.trim().is_empty() && author.trim().is_empty());
     let (search, matches) = if has_searched {
-            let works = match state.open_library.search_works(&title, &author).await {
-                Ok(works) => works,
-                Err(error) => {
-                    warn!(%title, %author, error = %error, "metadata search failed");
-                    return Err(StatusCode::BAD_GATEWAY);
-                }
-            };
-            (
-                RequestSearchView {
-                    title,
-                    author,
-                },
-                works.works.into_iter().map(WorkMatchView::from).collect(),
-            )
-        } else {
-            (RequestSearchView::default(), Vec::new())
+        let works = match state.open_library.search_works(&title, &author).await {
+            Ok(works) => works,
+            Err(error) => {
+                warn!(%title, %author, error = %error, "metadata search failed");
+                return Err(StatusCode::BAD_GATEWAY);
+            }
         };
+        (
+            RequestSearchView { title, author },
+            works.works.into_iter().map(WorkMatchView::from).collect(),
+        )
+    } else {
+        (RequestSearchView::default(), Vec::new())
+    };
 
-    Ok(render(RequestsIndexTemplate {
+    Ok(render(RequestsNewTemplate {
         search,
         matches,
         has_searched,
@@ -78,7 +89,11 @@ pub async fn create_request(
             return Err(StatusCode::BAD_REQUEST);
         }
     };
-    let selected_work = match state.open_library.resolve_work_by_id(&selected_work_id).await {
+    let selected_work = match state
+        .open_library
+        .resolve_work_by_id(&selected_work_id)
+        .await
+    {
         Ok(Some(resolved)) => resolved.work,
         Ok(None) => {
             warn!(%selected_work_id, "request creation rejected: selected work id not found");

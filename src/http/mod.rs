@@ -1,4 +1,5 @@
 pub mod handlers {
+    pub mod covers;
     pub mod health;
     pub mod requests;
 }

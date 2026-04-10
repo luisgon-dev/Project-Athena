@@ -1,67 +1,46 @@
 {% extends "layout.html" %}
 
-{% block title %}Admin Requests{% endblock %}
+{% block title %}Requests{% endblock %}
 
 {% block content %}
-<h1>Request a book</h1>
-<p>Search for a known work first, then choose the media types and preferences for the request.</p>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Admin</p>
+    <h1>Active requests</h1>
+    <p class="lede">Track every request currently stored in the router and jump into the request wizard when you need to add another one.</p>
+  </div>
+  <a class="button-link" href="/requests/new">New request</a>
+</div>
 
-<form method="get" action="/requests">
-  <label>Title
-    <input name="title" value="{{ search.title }}">
-  </label>
-  <label>Author
-    <input name="author" value="{{ search.author }}">
-  </label>
-  <button type="submit">Search metadata</button>
-</form>
-
-{% if has_searched %}
-<h2>Search results</h2>
-{% if matches.len() == 0 %}
-<p>No works matched that search.</p>
+{% if requests.len() == 0 %}
+<div class="empty-state">
+  <p>No requests yet.</p>
+  <p>Create the first one from the metadata-backed request wizard.</p>
+</div>
 {% else %}
-<form method="post" action="/requests">
-  <fieldset>
-    <legend>Select a matched work</legend>
-    {% for work in matches %}
-    <label class="choice">
-      <input type="radio" name="selected_work_id" value="{{ work.external_id }}">
-      <span>{{ work.title }} by {{ work.author }}</span>
-    </label>
+<table class="request-table">
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Author</th>
+      <th>Media</th>
+      <th>Status</th>
+      <th>Created</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for request in requests %}
+    <tr>
+      <td>{{ request.title }}</td>
+      <td>{{ request.author }}</td>
+      <td>{{ request.media_type_label }}</td>
+      <td><span class="status-pill">{{ request.state }}</span></td>
+      <td>{{ request.created_at }}</td>
+      <td><a href="/requests/{{ request.id }}">View</a></td>
+    </tr>
     {% endfor %}
-  </fieldset>
-
-  <fieldset>
-    <legend>Media types</legend>
-    <label class="choice">
-      <input type="checkbox" name="ebook">
-      <span>Ebook</span>
-    </label>
-    <label class="choice">
-      <input type="checkbox" name="audiobook">
-      <span>Audiobook</span>
-    </label>
-  </fieldset>
-
-  <label>Preferred language
-    <input name="preferred_language" value="en">
-  </label>
-  <label>Edition title
-    <input name="edition_title">
-  </label>
-  <label>Preferred narrator
-    <input name="preferred_narrator">
-  </label>
-  <label>Preferred publisher
-    <input name="preferred_publisher">
-  </label>
-  <label class="choice">
-    <input type="checkbox" name="graphic_audio">
-    <span>Graphic audio</span>
-  </label>
-  <button type="submit">Create request</button>
-</form>
-{% endif %}
+  </tbody>
+</table>
 {% endif %}
 {% endblock %}

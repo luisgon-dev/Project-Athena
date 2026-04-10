@@ -72,3 +72,13 @@ pub struct RequestRecord {
     pub state: String,
     pub created_at: String,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RequestListRecord {
+    pub id: String,
+    pub title: String,
+    pub author: String,
+    pub media_type: MediaType,
+    pub state: String,
+    pub created_at: String,
+}

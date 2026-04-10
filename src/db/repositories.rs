@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::domain::{
     events::{RequestEventKind, RequestEventRecord},
-    requests::{CreateRequest, RequestRecord},
+    requests::{CreateRequest, RequestListRecord, RequestRecord},
 };
 
 pub struct SqliteRequestRepository {
@@ -183,6 +183,34 @@ impl SqliteRequestRepository {
                     request_id: row.get::<String, _>("request_id"),
                     kind: RequestEventKind::from_db(row.get::<String, _>("kind"))?,
                     payload_json: row.get::<String, _>("payload_json"),
+                    created_at: row.get::<String, _>("created_at"),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn list(&self) -> Result<Vec<RequestListRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, title, author, media_type, state, created_at
+             FROM requests
+             ORDER BY datetime(created_at) DESC, id DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(RequestListRecord {
+                    id: row.get::<String, _>("id"),
+                    title: row.get::<String, _>("title"),
+                    author: row.get::<String, _>("author"),
+                    media_type: match crate::domain::requests::MediaType::from_str(
+                        row.get::<String, _>("media_type").as_str(),
+                    ) {
+                        Some(media_type) => media_type,
+                        None => anyhow::bail!("unknown media type stored in requests"),
+                    },
+                    state: row.get::<String, _>("state"),
                     created_at: row.get::<String, _>("created_at"),
                 })
             })

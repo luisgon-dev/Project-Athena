@@ -1,23 +1,87 @@
 use axum::{
-    body::Body,
-    http::{Request, StatusCode},
+    body::{Body, to_bytes},
+    http::{Request, StatusCode, header as http_header},
 };
-use book_router::{
-    app::build_app,
-    config::AppConfig,
-    db::connect_sqlite,
-};
+use book_router::{app::build_app, config::AppConfig, db::connect_sqlite};
 use serde_json::json;
 use tower::util::ServiceExt;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
-async fn get_requests_searches_open_library_and_renders_matches() {
-    let server = MockServer::start().await;
-    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
+async fn get_requests_lists_active_requests_and_statuses() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let config = AppConfig::for_tests_with_database_path(tempdir.path().join("book-router.sqlite"));
+    let pool = connect_sqlite(&config.database).await.unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO requests (id, external_work_id, title, author, media_type, preferred_language, state, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("older-request")
+    .bind("OL100W")
+    .bind("Older Book")
+    .bind("Old Author")
+    .bind("ebook")
+    .bind(Option::<String>::None)
+    .bind("requested")
+    .bind("2026-04-10 00:00:00")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO requests (id, external_work_id, title, author, media_type, preferred_language, state, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("newer-request")
+    .bind("OL200W")
+    .bind("Newer Book")
+    .bind("New Author")
+    .bind("audiobook")
+    .bind(Option::<String>::None)
+    .bind("imported")
+    .bind("2026-04-10 00:00:01")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let app = build_app(config).await.unwrap();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("Active requests"));
+    assert!(body.contains("Newer Book"));
+    assert!(body.contains("Older Book"));
+    assert!(body.contains("imported"));
+    assert!(body.contains("requested"));
+    assert!(body.contains("/requests/new"));
+    assert!(body.contains("/requests/newer-request"));
+    assert!(body.contains("/requests/older-request"));
+    assert!(body.find("Newer Book").unwrap() < body.find("Older Book").unwrap());
+}
+
+#[tokio::test]
+async fn get_requests_new_searches_open_library_and_renders_enriched_matches() {
+    let server = MockServer::start().await;
+    let app = build_app(
+        AppConfig::for_tests()
+            .with_metadata_base_url(server.uri())
+            .with_cover_base_url(server.uri()),
+    )
+    .await
+    .unwrap();
 
     Mock::given(method("GET"))
         .and(path("/search.json"))
@@ -28,10 +92,56 @@ async fn get_requests_searches_open_library_and_renders_matches() {
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             r#"{
             "docs": [
-                {"key":"OL27448W","title":"The Hobbit","author_name":["J.R.R. Tolkien"]},
-                {"key":"OL99999W","title":"The Hobbit (Graphic Novel)","author_name":["David Wenzel"]}
+                {
+                    "key":"OL27448W",
+                    "title":"The Hobbit",
+                    "author_name":["J.R.R. Tolkien"],
+                    "first_publish_year":1937,
+                    "cover_i":2468,
+                    "subject":["Fantasy","Middle Earth","Adventure"],
+                    "edition_count":42
+                },
+                {
+                    "key":"OL99999W",
+                    "title":"The Hobbit (Graphic Novel)",
+                    "author_name":["David Wenzel"],
+                    "first_publish_year":1989,
+                    "cover_i":8642,
+                    "subject":["Graphic novels","Fantasy"],
+                    "edition_count":9
+                }
             ]
         }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/works/OL27448W.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+                "key":"/works/OL27448W",
+                "title":"The Hobbit",
+                "description":{"value":"Bilbo Baggins leaves the Shire for an unexpected journey."},
+                "subjects":["Fantasy","Adventure","Dragons"],
+                "covers":[2468]
+            }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/works/OL99999W.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+                "key":"/works/OL99999W",
+                "title":"The Hobbit (Graphic Novel)",
+                "description":"Illustrated adaptation of the classic fantasy.",
+                "subjects":["Graphic novels","Fantasy"],
+                "covers":[8642]
+            }"#,
             "application/json",
         ))
         .mount(&server)
@@ -41,7 +151,7 @@ async fn get_requests_searches_open_library_and_renders_matches() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests?title=The+Hobbit&author=Tolkien")
+                .uri("/requests/new?title=The+Hobbit&author=Tolkien")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -54,13 +164,19 @@ async fn get_requests_searches_open_library_and_renders_matches() {
     assert!(body.contains("Search results"));
     assert!(body.contains("The Hobbit"));
     assert!(body.contains("J.R.R. Tolkien"));
+    assert!(body.contains("1937"));
+    assert!(body.contains("Bilbo Baggins leaves the Shire"));
+    assert!(body.contains("Fantasy"));
+    assert!(body.contains("42 editions"));
+    assert!(body.contains("Canonical work ID: OL27448W"));
+    assert!(body.contains("/covers/openlibrary/2468"));
     assert!(body.contains("name=\"selected_work_id\""));
     assert!(body.contains("value=\"OL27448W\""));
     assert!(body.contains("The Hobbit (Graphic Novel)"));
 }
 
 #[tokio::test]
-async fn get_requests_normalizes_open_library_work_keys_for_followup_requests() {
+async fn get_requests_new_accepts_title_only_searches_and_normalizes_work_keys() {
     let server = MockServer::start().await;
     let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
         .await
@@ -86,7 +202,7 @@ async fn get_requests_normalizes_open_library_work_keys_for_followup_requests() 
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests?title=Dune")
+                .uri("/requests/new?title=Dune")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -98,6 +214,92 @@ async fn get_requests_normalizes_open_library_work_keys_for_followup_requests() 
 
     assert!(body.contains("value=\"OL123W\""));
     assert!(!body.contains("value=\"/works/OL123W\""));
+}
+
+#[tokio::test]
+async fn get_requests_new_accepts_author_only_searches() {
+    let server = MockServer::start().await;
+    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
+        .await
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/search.json"))
+        .and(query_param("title", ""))
+        .and(query_param("author", "Tolkien"))
+        .and(query_param("limit", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+                "docs":[
+                    {"key":"OL27448W","title":"The Hobbit","author_name":["J.R.R. Tolkien"]}
+                ]
+            }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/works/OL27448W.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+                "key":"/works/OL27448W",
+                "title":"The Hobbit",
+                "description":"A hobbit goes on an adventure."
+            }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests/new?author=Tolkien")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("The Hobbit"));
+    assert!(body.contains("J.R.R. Tolkien"));
+}
+
+#[tokio::test]
+async fn get_requests_new_renders_clean_no_match_state() {
+    let server = MockServer::start().await;
+    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
+        .await
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/search.json"))
+        .and(query_param("title", "No Match"))
+        .and(query_param("author", ""))
+        .and(query_param("limit", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(r#"{"docs":[]}"#, "application/json"))
+        .mount(&server)
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests/new?title=No+Match")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("No works matched that search."));
+    assert!(!body.contains("Create request"));
 }
 
 #[tokio::test]
@@ -141,7 +343,7 @@ async fn search_then_request_flow_handles_missing_author_metadata() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests?title=Mystery+Book")
+                .uri("/requests/new?title=Mystery+Book")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -188,6 +390,128 @@ async fn search_then_request_flow_handles_missing_author_metadata() {
     assert_eq!(detail.status(), StatusCode::OK);
     let detail_body = body_text(detail).await;
     assert!(detail_body.contains("Unknown author"));
+}
+
+#[tokio::test]
+async fn post_requests_still_works_after_title_only_search() {
+    let server = MockServer::start().await;
+    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
+        .await
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/search.json"))
+        .and(query_param("title", "Dune"))
+        .and(query_param("author", ""))
+        .and(query_param("limit", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+                "docs":[{"key":"OL123W","title":"Dune","author_name":["Frank Herbert"]}]
+            }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    stub_work_lookup(&server, "OL123W", "Dune", "/authors/OL1A", "Frank Herbert").await;
+
+    let search = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests/new?title=Dune")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(search.status(), StatusCode::OK);
+    let search_body = body_text(search).await;
+    assert!(search_body.contains("value=\"OL123W\""));
+
+    let create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/requests")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("selected_work_id=OL123W&ebook=on"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(create.status(), StatusCode::CREATED);
+    let create_body = body_text(create).await;
+    assert!(create_body.contains("Dune"));
+    assert!(create_body.contains("Frank Herbert"));
+}
+
+#[tokio::test]
+async fn get_openlibrary_cover_proxy_passthroughs_image_and_content_type() {
+    let server = MockServer::start().await;
+    let app = build_app(AppConfig::for_tests().with_cover_base_url(server.uri()))
+        .await
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/b/id/2468-M.jpg"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/jpeg")
+                .set_body_bytes(vec![1_u8, 2, 3, 4]),
+        )
+        .mount(&server)
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/covers/openlibrary/2468")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(http_header::CONTENT_TYPE).unwrap(),
+        "image/jpeg"
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.as_ref(), &[1, 2, 3, 4]);
+}
+
+#[tokio::test]
+async fn get_openlibrary_cover_proxy_uses_default_size_and_passes_through_404() {
+    let server = MockServer::start().await;
+    let app = build_app(AppConfig::for_tests().with_cover_base_url(server.uri()))
+        .await
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/b/id/999-M.jpg"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/covers/openlibrary/999")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -531,13 +855,7 @@ fn extract_request_links(body: &str) -> Vec<String> {
         .collect()
 }
 
-async fn stub_search(
-    server: &MockServer,
-    title: &str,
-    author: &str,
-    limit: &str,
-    body: &str,
-) {
+async fn stub_search(server: &MockServer, title: &str, author: &str, limit: &str, body: &str) {
     Mock::given(method("GET"))
         .and(path("/search.json"))
         .and(query_param("title", title))
@@ -572,10 +890,10 @@ async fn stub_work_lookup(
 
     Mock::given(method("GET"))
         .and(path(format!("{author_key}.json")))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            format!(r#"{{"name":"{author_name}"}}"#),
-            "application/json",
-        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(format!(r#"{{"name":"{author_name}"}}"#), "application/json"),
+        )
         .mount(server)
         .await;
 }

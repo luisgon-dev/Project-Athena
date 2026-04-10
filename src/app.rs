@@ -10,8 +10,9 @@ use crate::{
     config::AppConfig,
     db::connect_sqlite,
     http::handlers::{
+        covers::openlibrary_cover,
         health::health,
-        requests::{create_request, requests_index, show_request},
+        requests::{create_request, new_request, requests_index, show_request},
     },
     metadata::openlibrary::OpenLibraryClient,
 };
@@ -26,17 +27,16 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
     config.validate()?;
     let pool = connect_sqlite(&config.database).await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
-    let open_library = OpenLibraryClient::new(config.metadata_base_url);
+    let open_library = OpenLibraryClient::new(config.metadata_base_url, config.cover_base_url);
     backfill_legacy_request_work_ids(&pool, &open_library).await?;
-    let state = AppState {
-        pool,
-        open_library,
-    };
+    let state = AppState { pool, open_library };
 
     Ok(Router::new()
         .route("/health", get(health))
         .route("/requests", get(requests_index).post(create_request))
+        .route("/requests/new", get(new_request))
         .route("/requests/{id}", get(show_request))
+        .route("/covers/openlibrary/{cover_id}", get(openlibrary_cover))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -103,18 +103,9 @@ async fn backfill_request_work_identity(
         .with_context(|| format!("invalid request event payload for request {request_id}"))?;
 
     if let Some(object) = payload.as_object_mut() {
-        object.insert(
-            "external_work_id".to_string(),
-            json!(&external_work_id),
-        );
-        object.insert(
-            "title".to_string(),
-            json!(&resolved_title),
-        );
-        object.insert(
-            "author".to_string(),
-            json!(&resolved_author),
-        );
+        object.insert("external_work_id".to_string(), json!(&external_work_id));
+        object.insert("title".to_string(), json!(&resolved_title));
+        object.insert("author".to_string(), json!(&resolved_author));
         object.insert(
             "work".to_string(),
             json!({
