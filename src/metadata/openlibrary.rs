@@ -28,9 +28,9 @@ impl OpenLibraryClient {
             .await?
             .into_iter()
             .map(|doc| WorkRecord {
-                external_id: doc.key,
+                external_id: normalize_work_key(&doc.key),
                 title: doc.title,
-                primary_author: doc.author_name.into_iter().next().unwrap_or_default(),
+                primary_author: normalize_author_name(doc.author_name.into_iter().next()),
             })
             .collect();
 
@@ -46,18 +46,19 @@ impl OpenLibraryClient {
             .into_iter()
             .find(|doc| {
                 normalize_text(&doc.title) == expected_title
-                    && doc
-                        .author_name
-                        .iter()
-                        .any(|candidate| normalize_text(candidate) == expected_author)
+                    && (expected_author.is_empty()
+                        || doc
+                            .author_name
+                            .iter()
+                            .any(|candidate| normalize_text(candidate) == expected_author))
             })
             .ok_or_else(|| anyhow::anyhow!("no work match"))?;
 
         Ok(ResolvedWork {
             work: WorkRecord {
-                external_id: first.key,
+                external_id: normalize_work_key(&first.key),
                 title: first.title,
-                primary_author: first.author_name.into_iter().next().unwrap_or_default(),
+                primary_author: normalize_author_name(first.author_name.into_iter().next()),
             },
         })
     }
@@ -87,7 +88,7 @@ impl OpenLibraryClient {
             .find_map(|entry| entry.author.map(|author| author.key))
             .unwrap_or_default();
         let primary_author = if author_key.is_empty() {
-            String::new()
+            unknown_author()
         } else {
             self.fetch_author_name(&author_key).await?
         };
@@ -130,7 +131,7 @@ impl OpenLibraryClient {
             .error_for_status()?;
 
         let payload: AuthorResponse = response.json().await?;
-        Ok(payload.name)
+        Ok(normalize_author_name(Some(payload.name)))
     }
 }
 
@@ -184,4 +185,25 @@ fn normalize_text(value: &str) -> String {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+fn normalize_work_key(value: &str) -> String {
+    value.trim_start_matches("/works/").to_string()
+}
+
+fn normalize_author_name(value: Option<String>) -> String {
+    value
+        .and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .unwrap_or_else(unknown_author)
+}
+
+fn unknown_author() -> String {
+    "Unknown author".to_string()
 }

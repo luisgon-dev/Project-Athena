@@ -60,6 +60,137 @@ async fn get_requests_searches_open_library_and_renders_matches() {
 }
 
 #[tokio::test]
+async fn get_requests_normalizes_open_library_work_keys_for_followup_requests() {
+    let server = MockServer::start().await;
+    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
+        .await
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/search.json"))
+        .and(query_param("title", "Dune"))
+        .and(query_param("author", ""))
+        .and(query_param("limit", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+            "docs": [
+                {"key":"/works/OL123W","title":"Dune","author_name":["Frank Herbert"]}
+            ]
+        }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests?title=Dune")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+
+    assert!(body.contains("value=\"OL123W\""));
+    assert!(!body.contains("value=\"/works/OL123W\""));
+}
+
+#[tokio::test]
+async fn search_then_request_flow_handles_missing_author_metadata() {
+    let server = MockServer::start().await;
+    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
+        .await
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/search.json"))
+        .and(query_param("title", "Mystery Book"))
+        .and(query_param("author", ""))
+        .and(query_param("limit", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+            "docs": [
+                {"key":"/works/OL999W","title":"Mystery Book"}
+            ]
+        }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/works/OL999W.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+                "key": "/works/OL999W",
+                "title": "Mystery Book",
+                "authors": []
+            }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let search_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests?title=Mystery+Book")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(search_response.status(), StatusCode::OK);
+    let search_body = body_text(search_response).await;
+    assert!(search_body.contains("Mystery Book"));
+    assert!(search_body.contains("Unknown author"));
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/requests")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("selected_work_id=OL999W&ebook=on"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let create_body = body_text(create_response).await;
+    assert!(create_body.contains("Unknown author"));
+
+    let location = extract_request_links(&create_body)
+        .into_iter()
+        .next()
+        .expect("created request link");
+    let detail = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(location)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(detail.status(), StatusCode::OK);
+    let detail_body = body_text(detail).await;
+    assert!(detail_body.contains("Unknown author"));
+}
+
+#[tokio::test]
 async fn post_requests_with_both_media_types_creates_two_requests_from_provider_canonical_data() {
     let server = MockServer::start().await;
     let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
