@@ -59,6 +59,16 @@ async fn post_requests_with_both_media_types_creates_two_requests() {
     let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
         .await
         .unwrap();
+    stub_search(
+        &server,
+        "The Hobbit",
+        "J.R.R. Tolkien",
+        "10",
+        r#"{
+            "docs":[{"key":"OL27448W","title":"The Hobbit","author_name":["J.R.R. Tolkien"]}]
+        }"#,
+    )
+    .await;
 
     let response = app
         .clone()
@@ -130,9 +140,56 @@ async fn post_requests_rejects_raw_free_text_creation_without_selected_match() {
 }
 
 #[tokio::test]
+async fn post_requests_rejects_forged_selected_work_not_backed_by_metadata() {
+    let server = MockServer::start().await;
+    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
+        .await
+        .unwrap();
+    stub_search(
+        &server,
+        "The Hobbit",
+        "J.R.R. Tolkien",
+        "10",
+        r#"{
+            "docs":[{"key":"OL99999W","title":"The Hobbit","author_name":["J.R.R. Tolkien"]}]
+        }"#,
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/requests")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "selected_work=OL27448W%7CThe+Hobbit%7CJ.R.R.+Tolkien&audiobook=on",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn request_survives_app_rebuild_with_same_config() {
     let tempdir = tempfile::tempdir().unwrap();
-    let config = AppConfig::for_tests_with_database_path(tempdir.path().join("book-router.sqlite"));
+    let server = MockServer::start().await;
+    let config = AppConfig::for_tests_with_database_path(tempdir.path().join("book-router.sqlite"))
+        .with_metadata_base_url(server.uri());
+    stub_search(
+        &server,
+        "The Hobbit",
+        "J.R.R. Tolkien",
+        "10",
+        r#"{
+            "docs":[{"key":"OL27448W","title":"The Hobbit","author_name":["J.R.R. Tolkien"]}]
+        }"#,
+    )
+    .await;
+
     let location = {
         let app = build_app(config.clone()).await.unwrap();
 
@@ -185,4 +242,21 @@ fn extract_request_links(body: &str) -> Vec<String> {
         .filter(|value| value.starts_with("/requests/"))
         .map(str::to_string)
         .collect()
+}
+
+async fn stub_search(
+    server: &MockServer,
+    title: &str,
+    author: &str,
+    limit: &str,
+    body: &str,
+) {
+    Mock::given(method("GET"))
+        .and(path("/search.json"))
+        .and(query_param("title", title))
+        .and(query_param("author", author))
+        .and(query_param("limit", limit))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+        .mount(server)
+        .await;
 }

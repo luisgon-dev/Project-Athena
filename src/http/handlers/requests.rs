@@ -69,6 +69,7 @@ pub async fn create_request(
     Form(form): Form<CreateRequestForm>,
 ) -> Result<(StatusCode, Html<String>), StatusCode> {
     let selected_work = parse_selected_work(form.selected_work).ok_or(StatusCode::BAD_REQUEST)?;
+    validate_selected_work(&state, &selected_work).await?;
     let media_types = parse_media_types(form.ebook.is_some(), form.audiobook.is_some())?;
     let repo = SqliteRequestRepository::new(state.pool);
     let manifestation = ManifestationPreference {
@@ -131,6 +132,7 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
 
 #[derive(Clone)]
 struct SelectedWork {
+    external_id: String,
     title: String,
     author: String,
 }
@@ -147,6 +149,7 @@ fn parse_selected_work(value: Option<String>) -> Option<SelectedWork> {
     }
 
     Some(SelectedWork {
+        external_id: external_id.to_string(),
         title: title.to_string(),
         author: author.to_string(),
     })
@@ -166,4 +169,27 @@ fn parse_media_types(ebook: bool, audiobook: bool) -> Result<Vec<MediaType>, Sta
     }
 
     Ok(media_types)
+}
+
+async fn validate_selected_work(
+    state: &AppState,
+    selected_work: &SelectedWork,
+) -> Result<(), StatusCode> {
+    let matches = state
+        .open_library
+        .search_works(&selected_work.title, &selected_work.author)
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    let is_valid = matches.works.into_iter().any(|work| {
+        work.external_id == selected_work.external_id
+            && work.title == selected_work.title
+            && work.primary_author == selected_work.author
+    });
+
+    if is_valid {
+        Ok(())
+    } else {
+        Err(StatusCode::BAD_REQUEST)
+    }
 }
