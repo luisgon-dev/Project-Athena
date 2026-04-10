@@ -1,18 +1,18 @@
 services:
-  book-router:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: book-router:local
-    container_name: book-router
-    environment:
-      BIND_ADDR: 0.0.0.0:3000
-      EBOOKS_ROOT: /ebooks
-      AUDIOBOOKS_ROOT: /audiobooks
-      DATABASE_PATH: /data/book-router/book-router.sqlite
-    ports:
-      - "${BOOK_ROUTER_PORT:-3000}:3000"
-    volumes:
-      - ./data:/data/book-router
-      - ./media/ebooks:/ebooks
-      - ./media/audiobooks:/audiobooks
+    book-router:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        image: book-router:local
+        container_name: book-router
+        environment:
+            EBOOKS_ROOT: /ebooks
+            AUDIOBOOKS_ROOT: /audiobooks
+            DATABASE_PATH: /data/book-router/book-router.sqlite
+        ports:
+            # host:container. Change the left side if 3000 is already in use.
+            - "3000:3000"
+        volumes:
+            - ./data:/data/book-router
+            - ./media/ebooks:/ebooks
+            - ./media/audiobooks:/audiobooks
