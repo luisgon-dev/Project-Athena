@@ -10,8 +10,7 @@ services:
             AUDIOBOOKS_ROOT: /audiobooks
             DATABASE_PATH: /data/book-router/book-router.sqlite
         ports:
-            # host:container. Change the left side if 3000 is already in use.
-            - "3000:3000"
+            - "3001:3000"
         volumes:
             - ./data:/data/book-router
             - ./media/ebooks:/ebooks
