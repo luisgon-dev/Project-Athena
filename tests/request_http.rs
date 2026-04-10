@@ -244,7 +244,7 @@ async fn build_app_backfills_missing_canonical_work_identity_for_legacy_requests
     )
     .bind("legacy-request")
     .bind("")
-    .bind("The Hobbit")
+    .bind("The Hob-bit!")
     .bind("J.R.R. Tolkien")
     .bind("audiobook")
     .bind(Option::<String>::None)
@@ -262,7 +262,7 @@ async fn build_app_backfills_missing_canonical_work_identity_for_legacy_requests
     .bind(
         json!({
             "request_id": "legacy-request",
-            "title": "The Hobbit",
+            "title": "The Hob-bit!",
             "author": "J.R.R. Tolkien",
             "media_type": "audiobook",
             "preferred_language": null,
@@ -281,7 +281,7 @@ async fn build_app_backfills_missing_canonical_work_identity_for_legacy_requests
 
     stub_search(
         &server,
-        "The Hobbit",
+        "The Hob-bit!",
         "J.R.R. Tolkien",
         "5",
         r#"{
@@ -305,6 +305,85 @@ async fn build_app_backfills_missing_canonical_work_identity_for_legacy_requests
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
     assert!(body.contains("OL27448W"));
+    assert!(body.contains("The Hobbit"));
+    assert!(!body.contains("The Hob-bit!"));
+}
+
+#[tokio::test]
+async fn build_app_tolerates_unresolvable_legacy_requests() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    let config = AppConfig::for_tests_with_database_path(tempdir.path().join("book-router.sqlite"))
+        .with_metadata_base_url(server.uri());
+    let pool = connect_sqlite(&config.database).await.unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO requests (id, external_work_id, title, author, media_type, preferred_language, state, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+    )
+    .bind("legacy-unresolved")
+    .bind("")
+    .bind("Missing Book")
+    .bind("Unknown Author")
+    .bind("ebook")
+    .bind(Option::<String>::None)
+    .bind("requested")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO request_events (request_id, kind, payload_json, created_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+    )
+    .bind("legacy-unresolved")
+    .bind("request.created")
+    .bind(
+        json!({
+            "request_id": "legacy-unresolved",
+            "title": "Missing Book",
+            "author": "Unknown Author",
+            "media_type": "ebook",
+            "preferred_language": null,
+            "manifestation": {
+                "edition_title": null,
+                "preferred_narrator": null,
+                "preferred_publisher": null,
+                "graphic_audio": false
+            }
+        })
+        .to_string(),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/search.json"))
+        .and(query_param("title", "Missing Book"))
+        .and(query_param("author", "Unknown Author"))
+        .and(query_param("limit", "5"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let app = build_app(config).await.unwrap();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests/legacy-unresolved")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_text(response).await;
+    assert!(body.contains("Missing Book"));
+    assert!(body.contains("Unresolved"));
 }
 
 async fn body_text(response: axum::response::Response) -> String {

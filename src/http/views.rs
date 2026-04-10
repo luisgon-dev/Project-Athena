@@ -41,7 +41,11 @@ impl From<RequestRecord> for RequestDetailView {
     fn from(record: RequestRecord) -> Self {
         Self {
             id: record.id,
-            external_work_id: record.external_work_id,
+            external_work_id: if record.external_work_id.trim().is_empty() {
+                "Unresolved".to_string()
+            } else {
+                record.external_work_id
+            },
             title: record.title,
             author: record.author,
             media_type_label: media_type_label(&record.media_type),
