@@ -1,7 +1,36 @@
-use anyhow::Result;
 use serde::Deserialize;
 
 use crate::domain::catalog::{ResolvedWork, WorkRecord, WorkSearch};
+
+#[derive(Debug, thiserror::Error)]
+pub enum OpenLibraryError {
+    #[error("Open Library request timed out")]
+    Timeout(#[source] reqwest::Error),
+    #[error("Network error communicating with Open Library")]
+    Network(#[source] reqwest::Error),
+    #[error("Open Library returned an API error: {0} - {1}")]
+    ApiError(reqwest::StatusCode, String),
+    #[error("Failed to parse Open Library response")]
+    Serialization(#[source] serde_json::Error),
+    #[error("No work match found in Open Library")]
+    NoMatch,
+    #[error("Work not found in Open Library")]
+    NotFound,
+}
+
+impl OpenLibraryError {
+    fn from_reqwest(err: reqwest::Error) -> Self {
+        if err.is_timeout() {
+            Self::Timeout(err)
+        } else if let Some(status) = err.status() {
+            Self::ApiError(status, err.to_string())
+        } else {
+            Self::Network(err)
+        }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, OpenLibraryError>;
 
 #[derive(Clone)]
 pub struct OpenLibraryClient {
@@ -14,6 +43,7 @@ impl OpenLibraryClient {
     pub fn new(base_url: impl Into<String>, covers_base_url: impl Into<String>) -> Self {
         let http = reqwest::Client::builder()
             .user_agent("book-router/0.1")
+            .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("reqwest client");
 
@@ -52,7 +82,7 @@ impl OpenLibraryClient {
                             .iter()
                             .any(|candidate| normalize_text(candidate) == expected_author))
             })
-            .ok_or_else(|| anyhow::anyhow!("no work match"))?;
+            .ok_or(OpenLibraryError::NoMatch)?;
 
         Ok(ResolvedWork {
             work: WorkRecord::from(first),
@@ -104,20 +134,27 @@ impl OpenLibraryClient {
                 size.as_str()
             ))
             .send()
-            .await?;
+            .await
+            .map_err(OpenLibraryError::from_reqwest)?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
 
-        let response = response.error_for_status()?;
+        let response = response
+            .error_for_status()
+            .map_err(OpenLibraryError::from_reqwest)?;
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .unwrap_or("application/octet-stream")
             .to_string();
-        let bytes = response.bytes().await?.to_vec();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(OpenLibraryError::from_reqwest)?
+            .to_vec();
 
         Ok(Some(CoverImage {
             content_type,
@@ -139,10 +176,17 @@ impl OpenLibraryClient {
             ))
             .query(&[("title", title), ("author", author), ("limit", limit)])
             .send()
-            .await?
-            .error_for_status()?;
+            .await
+            .map_err(OpenLibraryError::from_reqwest)?
+            .error_for_status()
+            .map_err(OpenLibraryError::from_reqwest)?;
 
-        let payload: SearchResponse = response.json().await?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(OpenLibraryError::from_reqwest)?;
+        let payload: SearchResponse =
+            serde_json::from_slice(&bytes).map_err(OpenLibraryError::Serialization)?;
         Ok(payload.docs)
     }
 
@@ -172,13 +216,23 @@ impl OpenLibraryClient {
                 external_id
             ))
             .send()
-            .await?;
+            .await
+            .map_err(OpenLibraryError::from_reqwest)?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
 
-        Ok(Some(response.error_for_status()?.json().await?))
+        let response = response
+            .error_for_status()
+            .map_err(OpenLibraryError::from_reqwest)?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(OpenLibraryError::from_reqwest)?;
+        let payload: WorkResponse =
+            serde_json::from_slice(&bytes).map_err(OpenLibraryError::Serialization)?;
+        Ok(Some(payload))
     }
 
     async fn fetch_author_name(&self, author_key: &str) -> Result<String> {
@@ -190,10 +244,17 @@ impl OpenLibraryClient {
                 author_key
             ))
             .send()
-            .await?
-            .error_for_status()?;
+            .await
+            .map_err(OpenLibraryError::from_reqwest)?
+            .error_for_status()
+            .map_err(OpenLibraryError::from_reqwest)?;
 
-        let payload: AuthorResponse = response.json().await?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(OpenLibraryError::from_reqwest)?;
+        let payload: AuthorResponse =
+            serde_json::from_slice(&bytes).map_err(OpenLibraryError::Serialization)?;
         Ok(normalize_author_name(Some(payload.name)))
     }
 }
