@@ -3,6 +3,8 @@ use axum::{Router, routing::get};
 use serde_json::json;
 use sqlx::Row;
 use sqlx::SqlitePool;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 use crate::{
     config::AppConfig,
@@ -35,6 +37,11 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
         .route("/health", get(health))
         .route("/requests", get(requests_index).post(create_request))
         .route("/requests/{id}", get(show_request))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .with_state(state))
 }
 
