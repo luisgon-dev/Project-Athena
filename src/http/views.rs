@@ -24,6 +24,7 @@ pub fn media_type_label(media_type: &MediaType) -> &'static str {
 #[derive(Clone, Debug)]
 pub struct RequestDetailView {
     pub id: String,
+    pub external_work_id: String,
     pub title: String,
     pub author: String,
     pub media_type_label: &'static str,
@@ -40,6 +41,7 @@ impl From<RequestRecord> for RequestDetailView {
     fn from(record: RequestRecord) -> Self {
         Self {
             id: record.id,
+            external_work_id: record.external_work_id,
             title: record.title,
             author: record.author,
             media_type_label: media_type_label(&record.media_type),
@@ -73,7 +75,7 @@ pub struct RequestSearchView {
 
 #[derive(Clone, Debug)]
 pub struct WorkMatchView {
-    pub selection_value: String,
+    pub external_id: String,
     pub title: String,
     pub author: String,
 }
@@ -81,10 +83,7 @@ pub struct WorkMatchView {
 impl From<WorkRecord> for WorkMatchView {
     fn from(work: WorkRecord) -> Self {
         Self {
-            selection_value: format!(
-                "{}|{}|{}",
-                work.external_id, work.title, work.primary_author
-            ),
+            external_id: work.external_id,
             title: work.title,
             author: work.primary_author,
         }

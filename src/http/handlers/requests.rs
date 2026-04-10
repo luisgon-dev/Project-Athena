@@ -23,7 +23,7 @@ pub struct RequestSearchQuery {
 
 #[derive(Deserialize)]
 pub struct CreateRequestForm {
-    pub selected_work: Option<String>,
+    pub selected_work_id: Option<String>,
     pub ebook: Option<String>,
     pub audiobook: Option<String>,
     pub preferred_language: Option<String>,
@@ -68,8 +68,14 @@ pub async fn create_request(
     State(state): State<AppState>,
     Form(form): Form<CreateRequestForm>,
 ) -> Result<(StatusCode, Html<String>), StatusCode> {
-    let selected_work = parse_selected_work(form.selected_work).ok_or(StatusCode::BAD_REQUEST)?;
-    validate_selected_work(&state, &selected_work).await?;
+    let selected_work_id = normalize_optional_text(form.selected_work_id).ok_or(StatusCode::BAD_REQUEST)?;
+    let selected_work = state
+        .open_library
+        .resolve_work_by_id(&selected_work_id)
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .ok_or(StatusCode::BAD_REQUEST)?
+        .work;
     let media_types = parse_media_types(form.ebook.is_some(), form.audiobook.is_some())?;
     let repo = SqliteRequestRepository::new(state.pool);
     let manifestation = ManifestationPreference {
@@ -79,20 +85,25 @@ pub async fn create_request(
         graphic_audio: form.graphic_audio.is_some(),
     };
 
-    let mut created_requests = Vec::with_capacity(media_types.len());
-    for media_type in media_types {
-        let request = repo
-            .create(CreateRequest {
-                title: selected_work.title.clone(),
-                author: selected_work.author.clone(),
-                media_type,
-                preferred_language: normalize_optional_text(form.preferred_language.clone()),
-                manifestation: manifestation.clone(),
-            })
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        created_requests.push(CreatedRequestView::from(request));
-    }
+    let created_requests = repo
+        .create_batch(
+            media_types
+                .into_iter()
+                .map(|media_type| CreateRequest {
+                    external_work_id: selected_work.external_id.clone(),
+                    title: selected_work.title.clone(),
+                    author: selected_work.primary_author.clone(),
+                    media_type,
+                    preferred_language: normalize_optional_text(form.preferred_language.clone()),
+                    manifestation: manifestation.clone(),
+                })
+                .collect(),
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .into_iter()
+        .map(CreatedRequestView::from)
+        .collect();
 
     Ok((
         StatusCode::CREATED,
@@ -122,36 +133,12 @@ pub async fn show_request(
 
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
-        if value.trim().is_empty() {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
             None
         } else {
-            Some(value)
+            Some(trimmed.to_string())
         }
-    })
-}
-
-#[derive(Clone)]
-struct SelectedWork {
-    external_id: String,
-    title: String,
-    author: String,
-}
-
-fn parse_selected_work(value: Option<String>) -> Option<SelectedWork> {
-    let value = value?;
-    let mut fields = value.splitn(3, '|');
-    let external_id = fields.next()?.trim();
-    let title = fields.next()?.trim();
-    let author = fields.next()?.trim();
-
-    if external_id.is_empty() || title.is_empty() || author.is_empty() {
-        return None;
-    }
-
-    Some(SelectedWork {
-        external_id: external_id.to_string(),
-        title: title.to_string(),
-        author: author.to_string(),
     })
 }
 
@@ -169,27 +156,4 @@ fn parse_media_types(ebook: bool, audiobook: bool) -> Result<Vec<MediaType>, Sta
     }
 
     Ok(media_types)
-}
-
-async fn validate_selected_work(
-    state: &AppState,
-    selected_work: &SelectedWork,
-) -> Result<(), StatusCode> {
-    let matches = state
-        .open_library
-        .search_works(&selected_work.title, &selected_work.author)
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-
-    let is_valid = matches.works.into_iter().any(|work| {
-        work.external_id == selected_work.external_id
-            && work.title == selected_work.title
-            && work.primary_author == selected_work.author
-    });
-
-    if is_valid {
-        Ok(())
-    } else {
-        Err(StatusCode::BAD_REQUEST)
-    }
 }

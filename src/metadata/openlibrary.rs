@@ -62,6 +62,45 @@ impl OpenLibraryClient {
         })
     }
 
+    pub async fn resolve_work_by_id(&self, external_id: &str) -> Result<Option<ResolvedWork>> {
+        let response = self
+            .http
+            .get(format!(
+                "{}/works/{}.json",
+                self.base_url.trim_end_matches('/'),
+                external_id
+            ))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+
+        let response = response.error_for_status()?;
+
+        let payload: WorkResponse = response.json().await?;
+        let external_id = payload.external_id();
+        let author_key = payload
+            .authors
+            .into_iter()
+            .find_map(|entry| entry.author.map(|author| author.key))
+            .unwrap_or_default();
+        let primary_author = if author_key.is_empty() {
+            String::new()
+        } else {
+            self.fetch_author_name(&author_key).await?
+        };
+
+        Ok(Some(ResolvedWork {
+            work: WorkRecord {
+                external_id,
+                title: payload.title,
+                primary_author,
+            },
+        }))
+    }
+
     async fn fetch_search_docs(&self, title: &str, author: &str, limit: &str) -> Result<Vec<SearchDoc>> {
         let response = self
             .http
@@ -77,6 +116,22 @@ impl OpenLibraryClient {
         let payload: SearchResponse = response.json().await?;
         Ok(payload.docs)
     }
+
+    async fn fetch_author_name(&self, author_key: &str) -> Result<String> {
+        let response = self
+            .http
+            .get(format!(
+                "{}{}.json",
+                self.base_url.trim_end_matches('/'),
+                author_key
+            ))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let payload: AuthorResponse = response.json().await?;
+        Ok(payload.name)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +145,37 @@ struct SearchDoc {
     title: String,
     #[serde(default)]
     author_name: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkResponse {
+    key: String,
+    title: String,
+    #[serde(default)]
+    authors: Vec<WorkAuthorEntry>,
+}
+
+impl WorkResponse {
+    fn external_id(&self) -> String {
+        self.key
+            .trim_start_matches("/works/")
+            .to_string()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkAuthorEntry {
+    author: Option<AuthorKey>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthorKey {
+    key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthorResponse {
+    name: String,
 }
 
 fn normalize_text(value: &str) -> String {

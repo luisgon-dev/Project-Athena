@@ -92,3 +92,46 @@ async fn accepts_a_match_anywhere_in_author_name_list() {
     assert_eq!(result.work.title, "The Hobbit");
     assert_eq!(result.work.primary_author, "Someone Else");
 }
+
+#[tokio::test]
+async fn resolves_work_by_canonical_id() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/works/OL27448W.json"))
+        .and(header("user-agent", "book-router/0.1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+            "key":"/works/OL27448W",
+            "title":"The Hobbit",
+            "authors":[{"author":{"key":"/authors/OL26320A"}}]
+        }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/authors/OL26320A.json"))
+        .and(header("user-agent", "book-router/0.1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{
+            "key":"/authors/OL26320A",
+            "name":"J.R.R. Tolkien"
+        }"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let client = OpenLibraryClient::new(server.uri());
+    let result = client
+        .resolve_work_by_id("OL27448W")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result.work.external_id, "OL27448W");
+    assert_eq!(result.work.title, "The Hobbit");
+    assert_eq!(result.work.primary_author, "J.R.R. Tolkien");
+}

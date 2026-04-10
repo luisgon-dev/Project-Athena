@@ -52,6 +52,7 @@ impl Default for MediaType {
 }
 
 pub struct CreateRequest {
+    pub external_work_id: String,
     pub title: String,
     pub author: String,
     pub media_type: MediaType,
@@ -62,6 +63,7 @@ pub struct CreateRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestRecord {
     pub id: String,
+    pub external_work_id: String,
     pub title: String,
     pub author: String,
     pub media_type: MediaType,

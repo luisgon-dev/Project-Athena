@@ -26,7 +26,7 @@
     <legend>Select a matched work</legend>
     {% for work in matches %}
     <label class="choice">
-      <input type="radio" name="selected_work" value="{{ work.selection_value }}">
+      <input type="radio" name="selected_work_id" value="{{ work.external_id }}">
       <span>{{ work.title }} by {{ work.author }}</span>
     </label>
     {% endfor %}

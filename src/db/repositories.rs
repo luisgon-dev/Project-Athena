@@ -18,81 +18,113 @@ impl SqliteRequestRepository {
     }
 
     pub async fn create(&self, request: CreateRequest) -> Result<RequestRecord> {
-        let id = Uuid::new_v4().to_string();
-        let media_type = request.media_type.as_str();
-        let preferred_language = request.preferred_language.clone();
-        let manifestation = request.manifestation.clone();
+        let mut created = self.create_batch(vec![request]).await?;
+        created
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("create_batch returned no requests"))
+    }
+
+    pub async fn create_batch(&self, requests: Vec<CreateRequest>) -> Result<Vec<RequestRecord>> {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let mut tx = self.pool.begin().await?;
+        let mut created = Vec::with_capacity(requests.len());
 
-        sqlx::query(
-            "INSERT INTO requests (id, title, author, media_type, preferred_language, state, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
-        )
-        .bind(&id)
-        .bind(&request.title)
-        .bind(&request.author)
-        .bind(media_type)
-        .bind(preferred_language.as_deref())
-        .bind("requested")
-        .execute(&mut *tx)
-        .await?;
-
-        let payload_json = json!({
-            "request_id": id,
-            "title": request.title,
-            "author": request.author,
-            "media_type": media_type,
-            "preferred_language": preferred_language,
-            "manifestation": {
-                "edition_title": manifestation.edition_title,
-                "preferred_narrator": manifestation.preferred_narrator,
-                "preferred_publisher": manifestation.preferred_publisher,
-                "graphic_audio": manifestation.graphic_audio,
+        for request in requests {
+            if request.external_work_id.trim().is_empty() {
+                anyhow::bail!("external work id cannot be empty");
             }
-        })
-        .to_string();
 
-        sqlx::query(
-            "INSERT INTO request_events (request_id, kind, payload_json, created_at)
-             VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
-        )
-        .bind(&id)
-        .bind(RequestEventKind::Created.as_str())
-        .bind(payload_json)
-        .execute(&mut *tx)
-        .await?;
+            let id = Uuid::new_v4().to_string();
+            let external_work_id = request.external_work_id.clone();
+            let title = request.title.clone();
+            let author = request.author.clone();
+            let media_type = request.media_type.as_str();
+            let preferred_language = request.preferred_language.clone();
+            let manifestation = request.manifestation.clone();
 
-        let row = sqlx::query(
-            "SELECT id, title, author, media_type, preferred_language, state, created_at
-             FROM requests
-             WHERE id = ?",
-        )
-        .bind(&id)
-        .fetch_one(&mut *tx)
-        .await?;
+            sqlx::query(
+                "INSERT INTO requests (id, external_work_id, title, author, media_type, preferred_language, state, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            )
+            .bind(&id)
+            .bind(&external_work_id)
+            .bind(&title)
+            .bind(&author)
+            .bind(media_type)
+            .bind(preferred_language.as_deref())
+            .bind("requested")
+            .execute(&mut *tx)
+            .await?;
+
+            let payload_json = json!({
+                "request_id": id,
+                "external_work_id": &external_work_id,
+                "work": {
+                    "external_id": &external_work_id,
+                    "title": &title,
+                    "author": &author,
+                },
+                "title": &title,
+                "author": &author,
+                "media_type": media_type,
+                "preferred_language": preferred_language,
+                "manifestation": {
+                    "edition_title": manifestation.edition_title,
+                    "preferred_narrator": manifestation.preferred_narrator,
+                    "preferred_publisher": manifestation.preferred_publisher,
+                    "graphic_audio": manifestation.graphic_audio,
+                }
+            })
+            .to_string();
+
+            sqlx::query(
+                "INSERT INTO request_events (request_id, kind, payload_json, created_at)
+                 VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+            )
+            .bind(&id)
+            .bind(RequestEventKind::Created.as_str())
+            .bind(payload_json)
+            .execute(&mut *tx)
+            .await?;
+
+            let row = sqlx::query(
+                "SELECT id, external_work_id, title, author, media_type, preferred_language, state, created_at
+                 FROM requests
+                 WHERE id = ?",
+            )
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            created.push(RequestRecord {
+                id: row.get::<String, _>("id"),
+                external_work_id: row.get::<String, _>("external_work_id"),
+                title: row.get::<String, _>("title"),
+                author: row.get::<String, _>("author"),
+                media_type: match crate::domain::requests::MediaType::from_str(
+                    row.get::<String, _>("media_type").as_str(),
+                ) {
+                    Some(media_type) => media_type,
+                    None => anyhow::bail!("unknown media type stored in requests"),
+                },
+                preferred_language: row.get::<Option<String>, _>("preferred_language"),
+                manifestation,
+                state: row.get::<String, _>("state"),
+                created_at: row.get::<String, _>("created_at"),
+            });
+        }
 
         tx.commit().await?;
 
-        Ok(RequestRecord {
-            id: row.get::<String, _>("id"),
-            title: row.get::<String, _>("title"),
-            author: row.get::<String, _>("author"),
-            media_type: match crate::domain::requests::MediaType::from_str(
-                row.get::<String, _>("media_type").as_str(),
-            ) {
-                Some(media_type) => media_type,
-                None => anyhow::bail!("unknown media type stored in requests"),
-            },
-            preferred_language: row.get::<Option<String>, _>("preferred_language"),
-            manifestation,
-            state: row.get::<String, _>("state"),
-            created_at: row.get::<String, _>("created_at"),
-        })
+        Ok(created)
     }
 
     pub async fn find_by_id(&self, request_id: impl AsRef<str>) -> Result<Option<RequestRecord>> {
         let row = sqlx::query(
-            "SELECT id, title, author, media_type, preferred_language, state, created_at
+            "SELECT id, external_work_id, title, author, media_type, preferred_language, state, created_at
              FROM requests
              WHERE id = ?",
         )
@@ -117,6 +149,7 @@ impl SqliteRequestRepository {
 
         Ok(Some(RequestRecord {
             id: row.get::<String, _>("id"),
+            external_work_id: row.get::<String, _>("external_work_id"),
             title: row.get::<String, _>("title"),
             author: row.get::<String, _>("author"),
             media_type: match crate::domain::requests::MediaType::from_str(
