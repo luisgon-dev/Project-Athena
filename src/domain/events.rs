@@ -1,7 +1,8 @@
 use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum RequestEventKind {
     Created,
@@ -22,7 +23,7 @@ impl RequestEventKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RequestEventRecord {
     pub id: i64,

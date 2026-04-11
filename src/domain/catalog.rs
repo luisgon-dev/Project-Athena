@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct WorkRecord {
     pub external_id: String,
@@ -13,13 +14,13 @@ pub struct WorkRecord {
     pub edition_count: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ResolvedWork {
     pub work: WorkRecord,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct WorkSearch {
     pub works: Vec<WorkRecord>,

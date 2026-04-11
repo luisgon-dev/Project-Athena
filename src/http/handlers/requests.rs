@@ -1,23 +1,21 @@
 use axum::{
-    extract::{Form, Path, Query, State},
+    Json,
+    extract::{Path, Query, State},
     http::StatusCode,
-    response::Html,
 };
 use serde::Deserialize;
-use tracing::warn;
 
 use crate::{
     app::AppState,
     db::repositories::SqliteRequestRepository,
-    domain::requests::{CreateRequest, ManifestationPreference, MediaType},
-    http::{
-        error::AppError,
-        views::{
-            CreatedRequestView, RequestDetailView, RequestListView, RequestSearchView,
-            RequestsCreatedTemplate, RequestsIndexTemplate, RequestsNewTemplate, RequestsShowTemplate,
-            WorkMatchView, render,
+    domain::{
+        catalog::WorkSearch,
+        requests::{
+            CreateRequest, CreateRequestSelection, MediaType, RequestDetailRecord,
+            RequestListRecord,
         },
     },
+    http::error::AppError,
 };
 
 #[derive(Deserialize)]
@@ -26,59 +24,36 @@ pub struct RequestSearchQuery {
     pub author: Option<String>,
 }
 
-#[derive(Deserialize)]
-pub struct CreateRequestForm {
-    pub selected_work_id: Option<String>,
-    pub ebook: Option<String>,
-    pub audiobook: Option<String>,
-    pub preferred_language: Option<String>,
-    pub edition_title: Option<String>,
-    pub preferred_narrator: Option<String>,
-    pub preferred_publisher: Option<String>,
-    pub graphic_audio: Option<String>,
-}
-
-pub async fn requests_index(State(state): State<AppState>) -> Result<Html<String>, AppError> {
+pub async fn requests_index(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<RequestListRecord>>, AppError> {
     let repo = SqliteRequestRepository::new(state.pool);
-    let requests = repo
-        .list()
-        .await?
-        .into_iter()
-        .map(RequestListView::from)
-        .collect();
+    let requests = repo.list().await?;
 
-    Ok(render(RequestsIndexTemplate { requests }))
+    Ok(Json(requests))
 }
 
-pub async fn new_request(
+pub async fn search_requests(
     State(state): State<AppState>,
     Query(search): Query<RequestSearchQuery>,
-) -> Result<Html<String>, AppError> {
+) -> Result<Json<WorkSearch>, AppError> {
     let title = search.title.unwrap_or_default();
     let author = search.author.unwrap_or_default();
     let has_searched = !(title.trim().is_empty() && author.trim().is_empty());
-    let (search, matches) = if has_searched {
-        let works = state.open_library.search_works(&title, &author).await?;
-        (
-            RequestSearchView { title, author },
-            works.works.into_iter().map(WorkMatchView::from).collect(),
-        )
+    let works = if has_searched {
+        state.open_library.search_works(&title, &author).await?
     } else {
-        (RequestSearchView::default(), Vec::new())
+        WorkSearch { works: Vec::new() }
     };
 
-    Ok(render(RequestsNewTemplate {
-        search,
-        matches,
-        has_searched,
-    }))
+    Ok(Json(works))
 }
 
 pub async fn create_request(
     State(state): State<AppState>,
-    Form(form): Form<CreateRequestForm>,
-) -> Result<(StatusCode, Html<String>), AppError> {
-    let selected_work_id = normalize_optional_text(form.selected_work_id)
+    Json(payload): Json<CreateRequestSelection>,
+) -> Result<(StatusCode, Json<Vec<crate::domain::requests::RequestRecord>>), AppError> {
+    let selected_work_id = normalize_optional_text(payload.selected_work_id)
         .ok_or_else(|| AppError::BadRequest("missing selected_work_id".to_string()))?;
 
     let selected_work = state
@@ -88,15 +63,10 @@ pub async fn create_request(
         .ok_or_else(|| AppError::BadRequest("selected work id not found".to_string()))?
         .work;
 
-    let media_types = parse_media_types(form.ebook.is_some(), form.audiobook.is_some())?;
+    let media_types = parse_media_types(payload.media_types)?;
 
     let repo = SqliteRequestRepository::new(state.pool);
-    let manifestation = ManifestationPreference {
-        edition_title: normalize_optional_text(form.edition_title),
-        preferred_narrator: normalize_optional_text(form.preferred_narrator),
-        preferred_publisher: normalize_optional_text(form.preferred_publisher),
-        graphic_audio: form.graphic_audio.is_some(),
-    };
+    let manifestation = payload.manifestation;
 
     let created_requests = repo
         .create_batch(
@@ -107,37 +77,28 @@ pub async fn create_request(
                     title: selected_work.title.clone(),
                     author: selected_work.primary_author.clone(),
                     media_type,
-                    preferred_language: normalize_optional_text(form.preferred_language.clone()),
+                    preferred_language: normalize_optional_text(payload.preferred_language.clone()),
                     manifestation: manifestation.clone(),
                 })
                 .collect(),
         )
-        .await?
-        .into_iter()
-        .map(CreatedRequestView::from)
-        .collect();
+        .await?;
 
-    Ok((
-        StatusCode::CREATED,
-        render(RequestsCreatedTemplate {
-            requests: created_requests,
-        }),
-    ))
+    Ok((StatusCode::CREATED, Json(created_requests)))
 }
 
 pub async fn show_request(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Html<String>, AppError> {
+) -> Result<Json<RequestDetailRecord>, AppError> {
     let repo = SqliteRequestRepository::new(state.pool);
     let request = repo
         .find_by_id(&id)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Request with ID {} not found", id)))?;
+    let events = repo.events_for(&id).await?;
 
-    Ok(render(RequestsShowTemplate {
-        request: RequestDetailView::from(request),
-    }))
+    Ok(Json(RequestDetailRecord { request, events }))
 }
 
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
@@ -151,15 +112,7 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
     })
 }
 
-fn parse_media_types(ebook: bool, audiobook: bool) -> Result<Vec<MediaType>, AppError> {
-    let mut media_types = Vec::with_capacity(2);
-    if ebook {
-        media_types.push(MediaType::Ebook);
-    }
-    if audiobook {
-        media_types.push(MediaType::Audiobook);
-    }
-
+fn parse_media_types(media_types: Vec<MediaType>) -> Result<Vec<MediaType>, AppError> {
     if media_types.is_empty() {
         return Err(AppError::BadRequest("no media types selected".to_string()));
     }

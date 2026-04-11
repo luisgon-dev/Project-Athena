@@ -11,7 +11,12 @@ async fn app_boots_with_invalid_metadata_url() {
     let app = build_app(config).await.expect("App should boot even if metadata is unreachable");
     
     let response = app
-        .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 

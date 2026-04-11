@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Clone, Debug, PartialEq, Eq, TS)]
+use super::events::RequestEventRecord;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum MediaType {
     Ebook,
@@ -24,7 +27,7 @@ impl MediaType {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ManifestationPreference {
     pub edition_title: Option<String>,
@@ -55,7 +58,7 @@ impl Default for MediaType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CreateRequest {
     pub external_work_id: String,
@@ -66,7 +69,7 @@ pub struct CreateRequest {
     pub manifestation: ManifestationPreference,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RequestRecord {
     pub id: String,
@@ -80,7 +83,7 @@ pub struct RequestRecord {
     pub created_at: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RequestListRecord {
     pub id: String,
@@ -89,4 +92,22 @@ pub struct RequestListRecord {
     pub media_type: MediaType,
     pub state: String,
     pub created_at: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateRequestSelection {
+    pub selected_work_id: Option<String>,
+    #[serde(default)]
+    pub media_types: Vec<MediaType>,
+    pub preferred_language: Option<String>,
+    #[serde(default)]
+    pub manifestation: ManifestationPreference,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RequestDetailRecord {
+    pub request: RequestRecord,
+    pub events: Vec<RequestEventRecord>,
 }

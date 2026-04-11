@@ -1,5 +1,6 @@
 use axum::{Router, routing::get};
 use sqlx::SqlitePool;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
@@ -9,7 +10,7 @@ use crate::{
     http::handlers::{
         covers::openlibrary_cover,
         health::health,
-        requests::{create_request, new_request, requests_index, show_request},
+        requests::{create_request, requests_index, search_requests, show_request},
     },
     metadata::openlibrary::OpenLibraryClient,
     workers::backfill::BackfillWorker,
@@ -30,13 +31,19 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
     BackfillWorker::spawn(pool.clone(), open_library.clone());
     
     let state = AppState { pool, open_library };
-
-    Ok(Router::new()
+    let api_router = Router::new()
         .route("/health", get(health))
         .route("/requests", get(requests_index).post(create_request))
-        .route("/requests/new", get(new_request))
+        .route("/requests/search", get(search_requests))
         .route("/requests/{id}", get(show_request))
         .route("/covers/openlibrary/{cover_id}", get(openlibrary_cover))
+        .with_state(state.clone());
+    let frontend_service =
+        ServeDir::new("frontend/build").not_found_service(ServeFile::new("frontend/build/index.html"));
+
+    Ok(Router::new()
+        .nest("/api/v1", api_router)
+        .fallback_service(frontend_service)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))

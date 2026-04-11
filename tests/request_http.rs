@@ -3,13 +3,15 @@ use axum::{
     http::{Request, StatusCode, header as http_header},
 };
 use book_router::{app::build_app, config::AppConfig, db::connect_sqlite};
-use serde_json::json;
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+const API_PREFIX: &str = "/api/v1";
+
 #[tokio::test]
-async fn get_requests_lists_active_requests_and_statuses() {
+async fn get_requests_lists_active_requests_and_statuses_as_json() {
     let tempdir = tempfile::tempdir().unwrap();
     let config = AppConfig::for_tests_with_database_path(tempdir.path().join("book-router.sqlite"));
     let pool = connect_sqlite(&config.database).await.unwrap();
@@ -52,7 +54,7 @@ async fn get_requests_lists_active_requests_and_statuses() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests")
+                .uri(format!("{API_PREFIX}/requests"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -60,20 +62,20 @@ async fn get_requests_lists_active_requests_and_statuses() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = body_text(response).await;
-    assert!(body.contains("Active requests"));
-    assert!(body.contains("Newer Book"));
-    assert!(body.contains("Older Book"));
-    assert!(body.contains("imported"));
-    assert!(body.contains("requested"));
-    assert!(body.contains("/requests/new"));
-    assert!(body.contains("/requests/newer-request"));
-    assert!(body.contains("/requests/older-request"));
-    assert!(body.find("Newer Book").unwrap() < body.find("Older Book").unwrap());
+    assert_json_content_type(&response);
+    let body = json_body(response).await;
+    let requests = body.as_array().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["id"], "newer-request");
+    assert_eq!(requests[0]["title"], "Newer Book");
+    assert_eq!(requests[0]["media_type"], "Audiobook");
+    assert_eq!(requests[0]["state"], "imported");
+    assert_eq!(requests[1]["id"], "older-request");
+    assert_eq!(requests[1]["media_type"], "Ebook");
 }
 
 #[tokio::test]
-async fn get_requests_new_searches_open_library_and_renders_enriched_matches() {
+async fn get_requests_searches_open_library_and_returns_enriched_matches_as_json() {
     let server = MockServer::start().await;
     let app = build_app(
         AppConfig::for_tests()
@@ -151,7 +153,7 @@ async fn get_requests_new_searches_open_library_and_renders_enriched_matches() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests/new?title=The+Hobbit&author=Tolkien")
+                .uri(format!("{API_PREFIX}/requests/search?title=The+Hobbit&author=Tolkien"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -159,24 +161,24 @@ async fn get_requests_new_searches_open_library_and_renders_enriched_matches() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = body_text(response).await;
-
-    assert!(body.contains("Search results"));
-    assert!(body.contains("The Hobbit"));
-    assert!(body.contains("J.R.R. Tolkien"));
-    assert!(body.contains("1937"));
-    assert!(body.contains("Bilbo Baggins leaves the Shire"));
-    assert!(body.contains("Fantasy"));
-    assert!(body.contains("42 editions"));
-    assert!(body.contains("Canonical work ID: OL27448W"));
-    assert!(body.contains("/covers/openlibrary/2468"));
-    assert!(body.contains("name=\"selected_work_id\""));
-    assert!(body.contains("value=\"OL27448W\""));
-    assert!(body.contains("The Hobbit (Graphic Novel)"));
+    assert_json_content_type(&response);
+    let body = json_body(response).await;
+    let works = body["works"].as_array().unwrap();
+    assert_eq!(works.len(), 2);
+    assert_eq!(works[0]["external_id"], "OL27448W");
+    assert_eq!(works[0]["title"], "The Hobbit");
+    assert_eq!(works[0]["primary_author"], "J.R.R. Tolkien");
+    assert_eq!(works[0]["first_publish_year"], 1937);
+    assert_eq!(
+        works[0]["description"],
+        "Bilbo Baggins leaves the Shire for an unexpected journey."
+    );
+    assert_eq!(works[0]["cover_id"], 2468);
+    assert_eq!(works[0]["edition_count"], 42);
 }
 
 #[tokio::test]
-async fn get_requests_new_accepts_title_only_searches_and_normalizes_work_keys() {
+async fn get_requests_search_accepts_title_only_queries_and_normalizes_keys() {
     let server = MockServer::start().await;
     let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
         .await
@@ -202,7 +204,7 @@ async fn get_requests_new_accepts_title_only_searches_and_normalizes_work_keys()
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests/new?title=Dune")
+                .uri(format!("{API_PREFIX}/requests/search?title=Dune"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -210,67 +212,12 @@ async fn get_requests_new_accepts_title_only_searches_and_normalizes_work_keys()
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = body_text(response).await;
-
-    assert!(body.contains("value=\"OL123W\""));
-    assert!(!body.contains("value=\"/works/OL123W\""));
+    let body = json_body(response).await;
+    assert_eq!(body["works"][0]["external_id"], "OL123W");
 }
 
 #[tokio::test]
-async fn get_requests_new_accepts_author_only_searches() {
-    let server = MockServer::start().await;
-    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
-        .await
-        .unwrap();
-
-    Mock::given(method("GET"))
-        .and(path("/search.json"))
-        .and(query_param("title", ""))
-        .and(query_param("author", "Tolkien"))
-        .and(query_param("limit", "10"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{
-                "docs":[
-                    {"key":"OL27448W","title":"The Hobbit","author_name":["J.R.R. Tolkien"]}
-                ]
-            }"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
-
-    Mock::given(method("GET"))
-        .and(path("/works/OL27448W.json"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{
-                "key":"/works/OL27448W",
-                "title":"The Hobbit",
-                "description":"A hobbit goes on an adventure."
-            }"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/requests/new?author=Tolkien")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_text(response).await;
-    assert!(body.contains("The Hobbit"));
-    assert!(body.contains("J.R.R. Tolkien"));
-}
-
-#[tokio::test]
-async fn get_requests_new_renders_clean_no_match_state() {
+async fn get_requests_search_returns_empty_works_when_there_is_no_match() {
     let server = MockServer::start().await;
     let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
         .await
@@ -289,7 +236,7 @@ async fn get_requests_new_renders_clean_no_match_state() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests/new?title=No+Match")
+                .uri(format!("{API_PREFIX}/requests/search?title=No+Match"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -297,33 +244,83 @@ async fn get_requests_new_renders_clean_no_match_state() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = body_text(response).await;
-    assert!(body.contains("No works matched that search."));
-    assert!(!body.contains("Create request"));
+    let body = json_body(response).await;
+    assert_eq!(body["works"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
-async fn search_then_request_flow_handles_missing_author_metadata() {
+async fn post_requests_creates_requests_and_detail_includes_event_history() {
     let server = MockServer::start().await;
     let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
         .await
         .unwrap();
+    stub_work_lookup(
+        &server,
+        "OL27448W",
+        "The Hobbit: There and Back Again",
+        "/authors/OL26320A",
+        "J.R.R. Tolkien",
+    )
+    .await;
 
-    Mock::given(method("GET"))
-        .and(path("/search.json"))
-        .and(query_param("title", "Mystery Book"))
-        .and(query_param("author", ""))
-        .and(query_param("limit", "10"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{
-            "docs": [
-                {"key":"/works/OL999W","title":"Mystery Book"}
-            ]
-        }"#,
-            "application/json",
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("{API_PREFIX}/requests"),
+            json!({
+                "selected_work_id": "OL27448W",
+                "media_types": ["Ebook", "Audiobook"],
+                "preferred_language": "en",
+                "manifestation": {
+                    "edition_title": null,
+                    "preferred_narrator": "Andy Serkis",
+                    "preferred_publisher": null,
+                    "graphic_audio": true
+                }
+            }),
         ))
-        .mount(&server)
-        .await;
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_json_content_type(&response);
+    let body = json_body(response).await;
+    let created = body.as_array().unwrap();
+    assert_eq!(created.len(), 2);
+    assert_eq!(created[0]["title"], "The Hobbit: There and Back Again");
+    assert_eq!(created[0]["author"], "J.R.R. Tolkien");
+
+    for created_request in created {
+        let request_id = created_request["id"].as_str().unwrap();
+        let detail = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("{API_PREFIX}/requests/{request_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(detail.status(), StatusCode::OK);
+        let detail_body = json_body(detail).await;
+        assert_eq!(detail_body["request"]["external_work_id"], "OL27448W");
+        assert_eq!(detail_body["request"]["title"], "The Hobbit: There and Back Again");
+        assert_eq!(detail_body["request"]["manifestation"]["preferred_narrator"], "Andy Serkis");
+        assert_eq!(detail_body["events"].as_array().unwrap().len(), 1);
+        assert_eq!(detail_body["events"][0]["kind"], "Created");
+    }
+}
+
+#[tokio::test]
+async fn post_requests_handles_missing_author_metadata_in_json_flow() {
+    let server = MockServer::start().await;
+    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
+        .await
+        .unwrap();
 
     Mock::given(method("GET"))
         .and(path("/works/OL999W.json"))
@@ -338,49 +335,36 @@ async fn search_then_request_flow_handles_missing_author_metadata() {
         .mount(&server)
         .await;
 
-    let search_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/requests/new?title=Mystery+Book")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(search_response.status(), StatusCode::OK);
-    let search_body = body_text(search_response).await;
-    assert!(search_body.contains("Mystery Book"));
-    assert!(search_body.contains("Unknown author"));
-
     let create_response = app
         .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/requests")
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("selected_work_id=OL999W&ebook=on"))
-                .unwrap(),
-        )
+        .oneshot(json_request(
+            "POST",
+            &format!("{API_PREFIX}/requests"),
+            json!({
+                "selected_work_id": "OL999W",
+                "media_types": ["Ebook"],
+                "preferred_language": null,
+                "manifestation": {
+                    "edition_title": null,
+                    "preferred_narrator": null,
+                    "preferred_publisher": null,
+                    "graphic_audio": false
+                }
+            }),
+        ))
         .await
         .unwrap();
 
     assert_eq!(create_response.status(), StatusCode::CREATED);
-    let create_body = body_text(create_response).await;
-    assert!(create_body.contains("Unknown author"));
+    let created = json_body(create_response).await;
+    assert_eq!(created[0]["author"], "Unknown author");
 
-    let location = extract_request_links(&create_body)
-        .into_iter()
-        .next()
-        .expect("created request link");
+    let request_id = created[0]["id"].as_str().unwrap();
     let detail = app
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(location)
+                .uri(format!("{API_PREFIX}/requests/{request_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -388,66 +372,178 @@ async fn search_then_request_flow_handles_missing_author_metadata() {
         .unwrap();
 
     assert_eq!(detail.status(), StatusCode::OK);
-    let detail_body = body_text(detail).await;
-    assert!(detail_body.contains("Unknown author"));
+    let detail_body = json_body(detail).await;
+    assert_eq!(detail_body["request"]["author"], "Unknown author");
 }
 
 #[tokio::test]
-async fn post_requests_still_works_after_title_only_search() {
+async fn post_requests_rejects_invalid_json_payloads() {
+    let app = build_app(AppConfig::for_tests()).await.unwrap();
+
+    let missing_selection = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("{API_PREFIX}/requests"),
+            json!({
+                "media_types": ["Audiobook"],
+                "manifestation": {
+                    "edition_title": null,
+                    "preferred_narrator": null,
+                    "preferred_publisher": null,
+                    "graphic_audio": false
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(missing_selection.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(json_body(missing_selection).await["error"], "missing selected_work_id");
+
+    let missing_media_types = app
+        .oneshot(json_request(
+            "POST",
+            &format!("{API_PREFIX}/requests"),
+            json!({
+                "selected_work_id": "OL27448W",
+                "media_types": [],
+                "manifestation": {
+                    "edition_title": null,
+                    "preferred_narrator": null,
+                    "preferred_publisher": null,
+                    "graphic_audio": false
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(missing_media_types.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(json_body(missing_media_types).await["error"], "no media types selected");
+}
+
+#[tokio::test]
+async fn post_requests_rejects_forged_selected_work_not_backed_by_metadata() {
     let server = MockServer::start().await;
     let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
         .await
         .unwrap();
-
     Mock::given(method("GET"))
-        .and(path("/search.json"))
-        .and(query_param("title", "Dune"))
-        .and(query_param("author", ""))
-        .and(query_param("limit", "10"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{
-                "docs":[{"key":"OL123W","title":"Dune","author_name":["Frank Herbert"]}]
-            }"#,
-            "application/json",
-        ))
+        .and(path("/works/OL27448W.json"))
+        .respond_with(ResponseTemplate::new(404))
         .mount(&server)
         .await;
 
-    stub_work_lookup(&server, "OL123W", "Dune", "/authors/OL1A", "Frank Herbert").await;
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            &format!("{API_PREFIX}/requests"),
+            json!({
+                "selected_work_id": "OL27448W",
+                "media_types": ["Audiobook"],
+                "manifestation": {
+                    "edition_title": null,
+                    "preferred_narrator": null,
+                    "preferred_publisher": null,
+                    "graphic_audio": false
+                }
+            }),
+        ))
+        .await
+        .unwrap();
 
-    let search = app
-        .clone()
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(json_body(response).await["error"], "selected work id not found");
+}
+
+#[tokio::test]
+async fn request_survives_app_rebuild_with_same_config_using_api_routes() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    let config = AppConfig::for_tests_with_database_path(tempdir.path().join("book-router.sqlite"))
+        .with_metadata_base_url(server.uri());
+    stub_work_lookup(
+        &server,
+        "OL27448W",
+        "The Hobbit: There and Back Again",
+        "/authors/OL26320A",
+        "J.R.R. Tolkien",
+    )
+    .await;
+
+    let request_id = {
+        let app = build_app(config.clone()).await.unwrap();
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                &format!("{API_PREFIX}/requests"),
+                json!({
+                    "selected_work_id": "OL27448W",
+                    "media_types": ["Audiobook"],
+                    "preferred_language": "en",
+                    "manifestation": {
+                        "edition_title": null,
+                        "preferred_narrator": "Andy Serkis",
+                        "preferred_publisher": null,
+                        "graphic_audio": false
+                    }
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        json_body(response).await[0]["id"].as_str().unwrap().to_string()
+    };
+
+    let rebuilt_app = build_app(config).await.unwrap();
+    let detail = rebuilt_app
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests/new?title=Dune")
+                .uri(format!("{API_PREFIX}/requests/{request_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(search.status(), StatusCode::OK);
-    let search_body = body_text(search).await;
-    assert!(search_body.contains("value=\"OL123W\""));
+    assert_eq!(detail.status(), StatusCode::OK);
+    assert_eq!(json_body(detail).await["request"]["external_work_id"], "OL27448W");
+}
 
-    let create = app
-        .clone()
+#[tokio::test]
+async fn get_requests_search_returns_json_error_on_metadata_timeout() {
+    let server = MockServer::start().await;
+    let app = build_app(
+        AppConfig::for_tests()
+            .with_metadata_base_url(server.uri())
+            .with_cover_base_url(server.uri()),
+    )
+    .await
+    .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/search.json"))
+        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(11)))
+        .mount(&server)
+        .await;
+
+    let response = app
         .oneshot(
             Request::builder()
-                .method("POST")
-                .uri("/requests")
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("selected_work_id=OL123W&ebook=on"))
+                .method("GET")
+                .uri(format!("{API_PREFIX}/requests/search?title=Timeout"))
+                .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(create.status(), StatusCode::CREATED);
-    let create_body = body_text(create).await;
-    assert!(create_body.contains("Dune"));
-    assert!(create_body.contains("Frank Herbert"));
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "Metadata service timed out");
 }
 
 #[tokio::test]
@@ -471,7 +567,7 @@ async fn get_openlibrary_cover_proxy_passthroughs_image_and_content_type() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/covers/openlibrary/2468")
+                .uri(format!("{API_PREFIX}/covers/openlibrary/2468"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -504,7 +600,7 @@ async fn get_openlibrary_cover_proxy_uses_default_size_and_passes_through_404() 
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/covers/openlibrary/999")
+                .uri(format!("{API_PREFIX}/covers/openlibrary/999"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -512,210 +608,6 @@ async fn get_openlibrary_cover_proxy_uses_default_size_and_passes_through_404() 
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn post_requests_with_both_media_types_creates_two_requests_from_provider_canonical_data() {
-    let server = MockServer::start().await;
-    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
-        .await
-        .unwrap();
-    stub_work_lookup(
-        &server,
-        "OL27448W",
-        "The Hobbit: There and Back Again",
-        "/authors/OL26320A",
-        "J.R.R. Tolkien",
-    )
-    .await;
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/requests")
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from(
-                    "selected_work_id=OL27448W&ebook=on&audiobook=on&preferred_language=en&edition_title=&preferred_narrator=Andy+Serkis&preferred_publisher=&graphic_audio=on",
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let body = body_text(response).await;
-
-    assert!(body.contains("Created requests"));
-    assert!(body.matches("/requests/").count() >= 2);
-    assert!(body.contains("The Hobbit: There and Back Again"));
-    assert!(body.contains("Ebook"));
-    assert!(body.contains("Audiobook"));
-
-    let links = extract_request_links(&body);
-    assert_eq!(links.len(), 2);
-
-    for link in links {
-        let detail = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri(&link)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(detail.status(), StatusCode::OK);
-        let detail_body = body_text(detail).await;
-        assert!(detail_body.contains("The Hobbit: There and Back Again"));
-        assert!(detail_body.contains("J.R.R. Tolkien"));
-        assert!(detail_body.contains("OL27448W"));
-        assert!(detail_body.contains("Andy Serkis"));
-        assert!(detail_body.contains("Graphic audio: true"));
-    }
-}
-
-#[tokio::test]
-async fn post_requests_rejects_raw_free_text_creation_without_selected_match() {
-    let app = build_app(AppConfig::for_tests()).await.unwrap();
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/requests")
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from(
-                    "title=The+Hobbit&author=J.R.R.+Tolkien&audiobook=on",
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn post_requests_rejects_forged_selected_work_not_backed_by_metadata() {
-    let server = MockServer::start().await;
-    let app = build_app(AppConfig::for_tests().with_metadata_base_url(server.uri()))
-        .await
-        .unwrap();
-    Mock::given(method("GET"))
-        .and(path("/works/OL27448W.json"))
-        .respond_with(ResponseTemplate::new(404))
-        .mount(&server)
-        .await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/requests")
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("selected_work_id=OL27448W&audiobook=on"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn request_survives_app_rebuild_with_same_config() {
-    let tempdir = tempfile::tempdir().unwrap();
-    let server = MockServer::start().await;
-    let config = AppConfig::for_tests_with_database_path(tempdir.path().join("book-router.sqlite"))
-        .with_metadata_base_url(server.uri());
-    stub_work_lookup(
-        &server,
-        "OL27448W",
-        "The Hobbit: There and Back Again",
-        "/authors/OL26320A",
-        "J.R.R. Tolkien",
-    )
-    .await;
-
-    let location = {
-        let app = build_app(config.clone()).await.unwrap();
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/requests")
-                    .header("content-type", "application/x-www-form-urlencoded")
-                    .body(Body::from(
-                        "selected_work_id=OL27448W&audiobook=on&preferred_language=en&edition_title=&preferred_narrator=Andy+Serkis&preferred_publisher=",
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::CREATED);
-        extract_request_links(&body_text(response).await)
-            .into_iter()
-            .next()
-            .expect("request link")
-    };
-
-    let rebuilt_app = build_app(config).await.unwrap();
-    let detail = rebuilt_app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(location)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(detail.status(), StatusCode::OK);
-    let detail_body = body_text(detail).await;
-    assert!(detail_body.contains("OL27448W"));
-}
-
-#[tokio::test]
-async fn get_requests_new_returns_json_error_on_metadata_timeout() {
-    let server = MockServer::start().await;
-    let app = build_app(
-        AppConfig::for_tests()
-            .with_metadata_base_url(server.uri())
-            .with_cover_base_url(server.uri()),
-    )
-    .await
-    .unwrap();
-
-    Mock::given(method("GET"))
-        .and(path("/search.json"))
-        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(11)))
-        .mount(&server)
-        .await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/requests/new?title=Timeout")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
-    let body = body_text(response).await;
-    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(json["error"], "Metadata service timed out");
 }
 
 #[tokio::test]
@@ -781,14 +673,14 @@ async fn build_app_backfills_missing_canonical_work_identity_for_legacy_requests
 
     let app = build_app(config).await.unwrap();
 
-    let mut body = String::new();
+    let mut body = json!({});
     for _ in 0..10 {
         let response = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/requests/legacy-request")
+                    .uri(format!("{API_PREFIX}/requests/legacy-request"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -796,16 +688,16 @@ async fn build_app_backfills_missing_canonical_work_identity_for_legacy_requests
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        body = body_text(response).await;
-        if body.contains("OL27448W") {
+        body = json_body(response).await;
+        if body["request"]["external_work_id"] == "OL27448W" {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
-    assert!(body.contains("OL27448W"));
-    assert!(body.contains("The Hobbit"));
-    assert!(!body.contains("The Hob-bit!"));
+    assert_eq!(body["request"]["external_work_id"], "OL27448W");
+    assert_eq!(body["request"]["title"], "The Hobbit");
+    assert_ne!(body["request"]["title"], "The Hob-bit!");
 }
 
 #[tokio::test]
@@ -872,7 +764,7 @@ async fn build_app_tolerates_unresolvable_legacy_requests() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests/legacy-unresolved")
+                .uri(format!("{API_PREFIX}/requests/legacy-unresolved"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -880,23 +772,69 @@ async fn build_app_tolerates_unresolvable_legacy_requests() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = body_text(response).await;
-    assert!(body.contains("Missing Book"));
-    assert!(body.contains("Unresolved"));
+    let body = json_body(response).await;
+    assert_eq!(body["request"]["title"], "Missing Book");
+    assert_eq!(body["request"]["external_work_id"], "");
 }
 
-async fn body_text(response: axum::response::Response) -> String {
+#[tokio::test]
+async fn root_serves_the_frontend_shell() {
+    let app = build_app(AppConfig::for_tests()).await.unwrap();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(http_header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/html"
+    );
+    let body = text_body(response).await;
+    assert!(body.contains("<!doctype html>"));
+}
+
+fn json_request(method: &str, uri: &str, body: Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(http_header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn assert_json_content_type(response: &axum::response::Response) {
+    assert_eq!(
+        response
+            .headers()
+            .get(http_header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "application/json"
+    );
+}
+
+async fn text_body(response: axum::response::Response) -> String {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
     String::from_utf8(body.to_vec()).unwrap()
 }
 
-fn extract_request_links(body: &str) -> Vec<String> {
-    body.split('"')
-        .filter(|value| value.starts_with("/requests/"))
-        .map(str::to_string)
-        .collect()
+async fn json_body(response: axum::response::Response) -> Value {
+    serde_json::from_str(&text_body(response).await).unwrap()
 }
 
 async fn stub_search(server: &MockServer, title: &str, author: &str, limit: &str, body: &str) {

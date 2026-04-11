@@ -13,7 +13,7 @@ async fn health_returns_ok() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/health")
+                .uri("/api/v1/health")
                 .body(Body::empty())
                 .unwrap(),
         )
