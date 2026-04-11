@@ -20,6 +20,25 @@ impl BackfillWorker {
     }
 
     async fn run(self) -> anyhow::Result<()> {
+        loop {
+            match self.process_pending_backfills().await {
+                Ok(count) if count > 0 => {
+                    tracing::info!(count, "Backfilled requests");
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                }
+                Ok(_) => {
+                    // No pending work, sleep for an hour
+                    tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Backfill iteration failed, retrying in 5m");
+                    tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                }
+            }
+        }
+    }
+
+    async fn process_pending_backfills(&self) -> anyhow::Result<usize> {
         let legacy_rows = sqlx::query(
             "SELECT id, title, author
              FROM requests
@@ -28,6 +47,7 @@ impl BackfillWorker {
         .fetch_all(&self.pool)
         .await?;
 
+        let mut count = 0;
         for row in legacy_rows {
             let request_id = row.get::<String, _>("id");
             let title = row.get::<String, _>("title");
@@ -36,10 +56,12 @@ impl BackfillWorker {
                 self.backfill_request_work_identity(&request_id, &title, &author).await
             {
                 tracing::error!(error = %error, request_id = %request_id, "legacy request backfill skipped");
+            } else {
+                count += 1;
             }
         }
 
-        Ok(())
+        Ok(count)
     }
 
     async fn backfill_request_work_identity(
