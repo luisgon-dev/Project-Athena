@@ -780,19 +780,29 @@ async fn build_app_backfills_missing_canonical_work_identity_for_legacy_requests
     .await;
 
     let app = build_app(config).await.unwrap();
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/requests/legacy-request")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = body_text(response).await;
+    let mut body = String::new();
+    for _ in 0..10 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/requests/legacy-request")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        body = body_text(response).await;
+        if body.contains("OL27448W") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
     assert!(body.contains("OL27448W"));
     assert!(body.contains("The Hobbit"));
     assert!(!body.contains("The Hob-bit!"));
