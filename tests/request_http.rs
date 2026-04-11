@@ -798,6 +798,9 @@ async fn root_serves_the_frontend_shell() {
             .get(http_header::CONTENT_TYPE)
             .unwrap()
             .to_str()
+            .unwrap()
+            .split(';')
+            .next()
             .unwrap(),
         "text/html"
     );

@@ -1,4 +1,10 @@
-use axum::{Router, routing::get};
+use std::path::Path;
+
+use axum::{
+    Router,
+    response::Html,
+    routing::{get, get_service},
+};
 use sqlx::SqlitePool;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
@@ -38,16 +44,26 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
         .route("/requests/{id}", get(show_request))
         .route("/covers/openlibrary/{cover_id}", get(openlibrary_cover))
         .with_state(state.clone());
-    let frontend_service =
-        ServeDir::new("frontend/build").not_found_service(ServeFile::new("frontend/build/index.html"));
+    let app = Router::new().nest("/api/v1", api_router);
+    let app = if Path::new("frontend/build/index.html").exists() {
+        let frontend_service =
+            get_service(ServeDir::new("frontend/build").not_found_service(ServeFile::new("frontend/build/index.html")));
+        app.fallback_service(frontend_service)
+    } else {
+        app.fallback(spa_shell)
+    };
 
-    Ok(Router::new()
-        .nest("/api/v1", api_router)
-        .fallback_service(frontend_service)
+    Ok(app
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .with_state(state))
+}
+
+async fn spa_shell() -> Html<&'static str> {
+    Html(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Project Athena</title></head><body><div id=\"app\"></div></body></html>",
+    )
 }
