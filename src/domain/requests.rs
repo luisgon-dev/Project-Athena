@@ -1,4 +1,7 @@
-#[derive(Clone, Debug, PartialEq, Eq)]
+use ts_rs::TS;
+
+#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[ts(export)]
 pub enum MediaType {
     Ebook,
     Audiobook,
@@ -21,7 +24,8 @@ impl MediaType {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, TS)]
+#[ts(export)]
 pub struct ManifestationPreference {
     pub edition_title: Option<String>,
     pub preferred_narrator: Option<String>,
@@ -51,6 +55,8 @@ impl Default for MediaType {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[ts(export)]
 pub struct CreateRequest {
     pub external_work_id: String,
     pub title: String,
@@ -60,7 +66,8 @@ pub struct CreateRequest {
     pub manifestation: ManifestationPreference,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[ts(export)]
 pub struct RequestRecord {
     pub id: String,
     pub external_work_id: String,
@@ -73,7 +80,8 @@ pub struct RequestRecord {
     pub created_at: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, TS)]
+#[ts(export)]
 pub struct RequestListRecord {
     pub id: String,
     pub title: String,
