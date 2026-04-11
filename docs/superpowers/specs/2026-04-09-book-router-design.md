@@ -359,7 +359,10 @@ The sync layer should be abstract enough to support:
 
 ### Admin UI For v1
 
-The first UI is admin-only and should focus on operational clarity rather than broad product surface.
+The first UI is admin-only and should focus on operational clarity rather than broad product surface. To achieve a modern, fast, and robust UX without compromising backend stability, the UI implementation will follow a two-phased approach (even though this increases build complexity):
+
+- **Phase 1: Stabilize the Backend.** Refactor the Rust Axum API to ensure all failures (especially from external services like Open Library) result in clean, structured JSON errors rather than timeouts or unhandled panics. Move blocking operations (like startup backfilling) into background workers.
+- **Phase 2: Build the Frontend.** Separate the frontend into a dedicated Single Page Application (e.g., React/Vue/Svelte) that consumes the stabilized JSON API. This SPA will be compiled via a multi-stage Docker build and served statically by the Axum backend in production, eliminating CORS overhead while delivering a highly interactive, error-resilient admin experience.
 
 Core screens:
 - metadata search and request creation

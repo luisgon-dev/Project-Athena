@@ -34,6 +34,13 @@ Approved scope revision:
   - create one or two requests only from a metadata-backed match
 - there is no free-text fallback request path in v1
 
+## UI & Architecture Modernization Strategy (New Priority)
+
+To address fragility in the current SSR setup and ensure the admin UI feels fast and modern, we are adopting a separated frontend architecture bundled via Docker. This will increase build complexity but vastly improve error handling and developer experience. The implementation must prioritize these two phases for continuity:
+
+- **Phase 1: Stabilize the Backend.** Refactor the Rust API to gracefully handle external API failures (e.g. Open Library), returning clean JSON errors instead of timeouts/panics. Move blocking startup tasks to background workers.
+- **Phase 2: Build the Frontend.** Replace the Askama SSR templates with a modern SPA. The SPA will be compiled during a multi-stage Docker build and served statically by the Rust backend in production.
+
 ## Revised Immediate Next Milestone
 
 Before continuing with Prowlarr or download work, implement this milestone:
