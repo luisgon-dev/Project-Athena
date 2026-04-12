@@ -30,6 +30,13 @@ impl DatabaseTarget {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QbittorrentConfig {
+    pub base_url: String,
+    pub username: String,
+    pub password: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub bind_addr: String,
@@ -38,6 +45,7 @@ pub struct AppConfig {
     pub database: DatabaseTarget,
     pub metadata_base_url: String,
     pub cover_base_url: String,
+    pub qbittorrent: Option<QbittorrentConfig>,
 }
 
 impl AppConfig {
@@ -53,6 +61,7 @@ impl AppConfig {
             database: DatabaseTarget::memory(),
             metadata_base_url: "https://openlibrary.org".into(),
             cover_base_url: "https://covers.openlibrary.org".into(),
+            qbittorrent: None,
         }
     }
 
@@ -80,6 +89,7 @@ impl AppConfig {
                 .unwrap_or_else(|| "https://openlibrary.org".into()),
             cover_base_url: get("COVER_BASE_URL")
                 .unwrap_or_else(|| "https://covers.openlibrary.org".into()),
+            qbittorrent: qbittorrent_from_env(&get),
         };
 
         config.validate()?;
@@ -107,6 +117,18 @@ impl AppConfig {
             anyhow::bail!("cover base url must not be empty");
         }
 
+        if let Some(qbittorrent) = &self.qbittorrent {
+            if qbittorrent.base_url.trim().is_empty() {
+                anyhow::bail!("qbittorrent base url must not be empty");
+            }
+            if qbittorrent.username.trim().is_empty() {
+                anyhow::bail!("qbittorrent username must not be empty");
+            }
+            if qbittorrent.password.trim().is_empty() {
+                anyhow::bail!("qbittorrent password must not be empty");
+            }
+        }
+
         Ok(())
     }
 
@@ -119,6 +141,21 @@ impl AppConfig {
         self.cover_base_url = value.into();
         self
     }
+}
+
+fn qbittorrent_from_env<F>(get: &F) -> Option<QbittorrentConfig>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let base_url = get("QBITTORRENT_BASE_URL")?;
+    let username = get("QBITTORRENT_USERNAME").unwrap_or_default();
+    let password = get("QBITTORRENT_PASSWORD").unwrap_or_default();
+
+    Some(QbittorrentConfig {
+        base_url,
+        username,
+        password,
+    })
 }
 
 #[cfg(test)]

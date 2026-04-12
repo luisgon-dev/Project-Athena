@@ -83,6 +83,31 @@ pub struct RequestRecord {
     pub created_at: String,
 }
 
+impl RequestRecord {
+    pub fn for_tests(
+        title: impl Into<String>,
+        author: impl Into<String>,
+        media_type: MediaType,
+    ) -> Self {
+        Self {
+            id: "request-1".to_string(),
+            external_work_id: "work-1".to_string(),
+            title: title.into(),
+            author: author.into(),
+            media_type,
+            preferred_language: None,
+            manifestation: ManifestationPreference::default(),
+            state: "requested".to_string(),
+            created_at: "1970-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    pub fn with_preferences(mut self, manifestation: ManifestationPreference) -> Self {
+        self.manifestation = manifestation;
+        self
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RequestListRecord {

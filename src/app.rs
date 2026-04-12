@@ -33,9 +33,9 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
     let pool = connect_sqlite(&config.database).await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
     let open_library = OpenLibraryClient::new(config.metadata_base_url, config.cover_base_url);
-    
+
     BackfillWorker::spawn(pool.clone(), open_library.clone());
-    
+
     let state = AppState { pool, open_library };
     let api_router = Router::new()
         .route("/health", get(health))
@@ -46,8 +46,10 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
         .with_state(state.clone());
     let app = Router::new().nest("/api/v1", api_router);
     let app = if Path::new("frontend/build/index.html").exists() {
-        let frontend_service =
-            get_service(ServeDir::new("frontend/build").not_found_service(ServeFile::new("frontend/build/index.html")));
+        let frontend_service = get_service(
+            ServeDir::new("frontend/build")
+                .not_found_service(ServeFile::new("frontend/build/index.html")),
+        );
         app.fallback_service(frontend_service)
     } else {
         app.fallback(spa_shell)

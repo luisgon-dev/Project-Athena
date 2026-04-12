@@ -1,8 +1,8 @@
+use crate::metadata::openlibrary::OpenLibraryClient;
 use anyhow::Context;
 use serde_json::json;
 use sqlx::Row;
 use sqlx::SqlitePool;
-use crate::metadata::openlibrary::OpenLibraryClient;
 
 pub struct BackfillWorker {
     pool: SqlitePool,
@@ -52,8 +52,9 @@ impl BackfillWorker {
             let request_id = row.get::<String, _>("id");
             let title = row.get::<String, _>("title");
             let author = row.get::<String, _>("author");
-            if let Err(error) =
-                self.backfill_request_work_identity(&request_id, &title, &author).await
+            if let Err(error) = self
+                .backfill_request_work_identity(&request_id, &title, &author)
+                .await
             {
                 tracing::error!(error = %error, request_id = %request_id, "legacy request backfill skipped");
             } else {
@@ -70,10 +71,13 @@ impl BackfillWorker {
         title: &str,
         author: &str,
     ) -> anyhow::Result<()> {
-        let resolved = self.open_library
+        let resolved = self
+            .open_library
             .resolve_work(title, author)
             .await
-            .with_context(|| format!("failed to resolve canonical work for request {request_id}"))?;
+            .with_context(|| {
+                format!("failed to resolve canonical work for request {request_id}")
+            })?;
         let external_work_id = resolved.work.external_id.clone();
         let resolved_title = resolved.work.title.clone();
         let resolved_author = resolved.work.primary_author.clone();

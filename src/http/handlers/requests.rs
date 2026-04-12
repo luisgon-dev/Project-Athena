@@ -52,7 +52,13 @@ pub async fn search_requests(
 pub async fn create_request(
     State(state): State<AppState>,
     Json(payload): Json<CreateRequestSelection>,
-) -> Result<(StatusCode, Json<Vec<crate::domain::requests::RequestRecord>>), AppError> {
+) -> Result<
+    (
+        StatusCode,
+        Json<Vec<crate::domain::requests::RequestRecord>>,
+    ),
+    AppError,
+> {
     let selected_work_id = normalize_optional_text(payload.selected_work_id)
         .ok_or_else(|| AppError::BadRequest("missing selected_work_id".to_string()))?;
 

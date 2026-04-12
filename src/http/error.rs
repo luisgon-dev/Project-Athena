@@ -1,6 +1,10 @@
-use axum::{http::StatusCode, response::{IntoResponse, Response}, Json};
-use serde_json::json;
 use crate::metadata::openlibrary::OpenLibraryError;
+use axum::{
+    Json,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use serde_json::json;
 
 pub enum AppError {
     Metadata(OpenLibraryError),
@@ -13,13 +17,27 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
-            Self::Metadata(OpenLibraryError::Timeout(_)) => (StatusCode::GATEWAY_TIMEOUT, "Metadata service timed out".to_string()),
-            Self::Metadata(OpenLibraryError::NoMatch) => (StatusCode::NOT_FOUND, "No matching work found".to_string()),
-            Self::Metadata(_) => (StatusCode::BAD_GATEWAY, "Error from metadata service".to_string()),
-            Self::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()),
+            Self::Metadata(OpenLibraryError::Timeout(_)) => (
+                StatusCode::GATEWAY_TIMEOUT,
+                "Metadata service timed out".to_string(),
+            ),
+            Self::Metadata(OpenLibraryError::NoMatch) => {
+                (StatusCode::NOT_FOUND, "No matching work found".to_string())
+            }
+            Self::Metadata(_) => (
+                StatusCode::BAD_GATEWAY,
+                "Error from metadata service".to_string(),
+            ),
+            Self::Database(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            ),
             Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
-            Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred".to_string()),
+            Self::Internal(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred".to_string(),
+            ),
         };
 
         let body = Json(json!({ "error": message }));
@@ -28,13 +46,19 @@ impl IntoResponse for AppError {
 }
 
 impl From<OpenLibraryError> for AppError {
-    fn from(inner: OpenLibraryError) -> Self { Self::Metadata(inner) }
+    fn from(inner: OpenLibraryError) -> Self {
+        Self::Metadata(inner)
+    }
 }
 
 impl From<sqlx::Error> for AppError {
-    fn from(inner: sqlx::Error) -> Self { Self::Database(inner) }
+    fn from(inner: sqlx::Error) -> Self {
+        Self::Database(inner)
+    }
 }
 
 impl From<anyhow::Error> for AppError {
-    fn from(inner: anyhow::Error) -> Self { Self::Internal(inner) }
+    fn from(inner: anyhow::Error) -> Self {
+        Self::Internal(inner)
+    }
 }

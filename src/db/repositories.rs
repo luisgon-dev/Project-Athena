@@ -6,10 +6,17 @@ use uuid::Uuid;
 use crate::domain::{
     events::{RequestEventKind, RequestEventRecord},
     requests::{CreateRequest, RequestListRecord, RequestRecord},
+    search::{ReleaseCandidate, ReviewQueueEntry, ScoredCandidate},
 };
 
 pub struct SqliteRequestRepository {
     pool: SqlitePool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuedDownloadRecord {
+    pub request_id: String,
+    pub category: String,
 }
 
 impl SqliteRequestRepository {
@@ -215,6 +222,251 @@ impl SqliteRequestRepository {
                 })
             })
             .collect()
+    }
+
+    pub async fn enqueue_review_candidate(
+        &self,
+        request_id: &str,
+        candidate: &ReleaseCandidate,
+        scored: &ScoredCandidate,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO review_queue (
+                request_id,
+                candidate_external_id,
+                candidate_source,
+                candidate_title,
+                candidate_protocol,
+                candidate_size_bytes,
+                candidate_indexer,
+                score,
+                explanation_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(request_id)
+        .bind(&candidate.external_id)
+        .bind(&candidate.source)
+        .bind(&candidate.title)
+        .bind(&candidate.protocol)
+        .bind(candidate.size_bytes)
+        .bind(&candidate.indexer)
+        .bind(scored.score)
+        .bind(serde_json::to_string(&scored.explanation)?)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn review_queue_for(&self, request_id: &str) -> Result<Vec<ReviewQueueEntry>> {
+        let rows = sqlx::query(
+            "SELECT
+                id,
+                request_id,
+                candidate_external_id,
+                candidate_source,
+                candidate_title,
+                candidate_protocol,
+                candidate_size_bytes,
+                candidate_indexer,
+                score,
+                explanation_json,
+                created_at
+             FROM review_queue
+             WHERE request_id = ?
+             ORDER BY score DESC, id ASC",
+        )
+        .bind(request_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ReviewQueueEntry {
+                    id: row.get::<i64, _>("id"),
+                    request_id: row.get::<String, _>("request_id"),
+                    candidate: ReleaseCandidate {
+                        external_id: row.get::<String, _>("candidate_external_id"),
+                        source: row.get::<String, _>("candidate_source"),
+                        title: row.get::<String, _>("candidate_title"),
+                        protocol: row.get::<String, _>("candidate_protocol"),
+                        size_bytes: row.get::<i64, _>("candidate_size_bytes"),
+                        indexer: row.get::<String, _>("candidate_indexer"),
+                        download_url: None,
+                    },
+                    score: row.get::<f32, _>("score"),
+                    explanation: serde_json::from_str(
+                        row.get::<String, _>("explanation_json").as_str(),
+                    )?,
+                    created_at: row.get::<String, _>("created_at"),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn queue_download(
+        &self,
+        request_id: &str,
+        candidate: &ReleaseCandidate,
+        category: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO downloads (
+                request_id,
+                candidate_external_id,
+                candidate_source,
+                candidate_title,
+                candidate_protocol,
+                candidate_size_bytes,
+                candidate_indexer,
+                category,
+                status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(request_id)
+        .bind(&candidate.external_id)
+        .bind(&candidate.source)
+        .bind(&candidate.title)
+        .bind(&candidate.protocol)
+        .bind(candidate.size_bytes)
+        .bind(&candidate.indexer)
+        .bind(category)
+        .bind("queued")
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
+            .bind("queued")
+            .bind(request_id)
+            .execute(&self.pool)
+            .await?;
+
+        self.append_event(
+            request_id,
+            RequestEventKind::DownloadQueued,
+            json!({
+                "candidate_external_id": &candidate.external_id,
+                "candidate_source": &candidate.source,
+                "candidate_title": &candidate.title,
+                "candidate_protocol": &candidate.protocol,
+                "candidate_size_bytes": candidate.size_bytes,
+                "candidate_indexer": &candidate.indexer,
+                "download_url": &candidate.download_url,
+                "category": category,
+            }),
+        )
+        .await
+    }
+
+    pub async fn queued_downloads(&self) -> Result<Vec<QueuedDownloadRecord>> {
+        let rows = sqlx::query(
+            "SELECT request_id, category
+             FROM downloads
+             WHERE status = ?
+             ORDER BY id ASC",
+        )
+        .bind("queued")
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| QueuedDownloadRecord {
+                request_id: row.get::<String, _>("request_id"),
+                category: row.get::<String, _>("category"),
+            })
+            .collect())
+    }
+
+    pub async fn complete_download(&self, request_id: &str, files: &[String]) -> Result<()> {
+        sqlx::query(
+            "UPDATE downloads
+             SET status = ?, payload_json = ?, completed_at = CURRENT_TIMESTAMP
+             WHERE request_id = ? AND status = ?",
+        )
+        .bind("completed")
+        .bind(serde_json::to_string(files)?)
+        .bind(request_id)
+        .bind("queued")
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
+            .bind("downloaded")
+            .bind(request_id)
+            .execute(&self.pool)
+            .await?;
+
+        self.append_event(
+            request_id,
+            RequestEventKind::DownloadCompleted,
+            json!({ "files": files }),
+        )
+        .await
+    }
+
+    pub async fn mark_import_succeeded(
+        &self,
+        request_id: &str,
+        destination_path: &std::path::Path,
+    ) -> Result<()> {
+        sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
+            .bind("imported")
+            .bind(request_id)
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("UPDATE downloads SET status = ? WHERE request_id = ? AND status = ?")
+            .bind("imported")
+            .bind(request_id)
+            .bind("completed")
+            .execute(&self.pool)
+            .await?;
+
+        self.append_event(
+            request_id,
+            RequestEventKind::ImportSucceeded,
+            json!({ "destination_path": destination_path }),
+        )
+        .await
+    }
+
+    pub async fn mark_sync_succeeded(
+        &self,
+        request_id: &str,
+        target_path: &std::path::Path,
+    ) -> Result<()> {
+        sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
+            .bind("synced")
+            .bind(request_id)
+            .execute(&self.pool)
+            .await?;
+
+        self.append_event(
+            request_id,
+            RequestEventKind::SyncSucceeded,
+            json!({ "target_path": target_path }),
+        )
+        .await
+    }
+
+    async fn append_event(
+        &self,
+        request_id: &str,
+        kind: RequestEventKind,
+        payload: serde_json::Value,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO request_events (request_id, kind, payload_json, created_at)
+             VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+        )
+        .bind(request_id)
+        .bind(kind.as_str())
+        .bind(payload.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 }
 
