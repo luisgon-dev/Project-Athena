@@ -77,6 +77,26 @@ pub struct ProwlarrIntegrationUpdate {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
+pub struct AudiobookshelfIntegrationRecord {
+    pub enabled: bool,
+    pub base_url: String,
+    pub library_id: String,
+    pub has_api_key: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AudiobookshelfIntegrationUpdate {
+    pub enabled: Option<bool>,
+    pub base_url: Option<String>,
+    pub library_id: Option<String>,
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub clear_api_key: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ImportSettingsRecord {
     pub naming_template: String,
     pub calibre_command: String,
@@ -123,12 +143,14 @@ pub struct DownloadClientSettingsUpdate {
 #[ts(export)]
 pub struct IntegrationSettingsRecord {
     pub prowlarr: ProwlarrIntegrationRecord,
+    pub audiobookshelf: AudiobookshelfIntegrationRecord,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct IntegrationSettingsUpdate {
     pub prowlarr: Option<ProwlarrIntegrationUpdate>,
+    pub audiobookshelf: Option<AudiobookshelfIntegrationUpdate>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -193,6 +215,14 @@ pub struct PersistedProwlarrIntegrationSettings {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersistedAudiobookshelfIntegrationSettings {
+    pub enabled: bool,
+    pub base_url: String,
+    pub library_id: String,
+    pub api_key: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersistedImportSettings {
     pub naming_template: String,
     pub calibre_command: String,
@@ -224,6 +254,7 @@ pub struct PersistedDownloadClientSettings {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersistedIntegrationSettings {
     pub prowlarr: PersistedProwlarrIntegrationSettings,
+    pub audiobookshelf: PersistedAudiobookshelfIntegrationSettings,
 }
 
 impl PersistedRuntimeSettings {
@@ -260,6 +291,12 @@ impl PersistedRuntimeSettings {
                     enabled: false,
                     sync_enabled: false,
                     base_url: String::new(),
+                    api_key: None,
+                },
+                audiobookshelf: PersistedAudiobookshelfIntegrationSettings {
+                    enabled: false,
+                    base_url: String::new(),
+                    library_id: String::new(),
                     api_key: None,
                 },
             },
@@ -300,6 +337,12 @@ impl PersistedRuntimeSettings {
                     sync_enabled: self.integrations.prowlarr.sync_enabled,
                     base_url: self.integrations.prowlarr.base_url.clone(),
                     has_api_key: self.integrations.prowlarr.api_key.is_some(),
+                },
+                audiobookshelf: AudiobookshelfIntegrationRecord {
+                    enabled: self.integrations.audiobookshelf.enabled,
+                    base_url: self.integrations.audiobookshelf.base_url.clone(),
+                    library_id: self.integrations.audiobookshelf.library_id.clone(),
+                    has_api_key: self.integrations.audiobookshelf.api_key.is_some(),
                 },
             },
             import: ImportSettingsRecord {
@@ -363,26 +406,47 @@ impl PersistedRuntimeSettings {
             }
         }
 
-        if let Some(integrations) = update.integrations
-            && let Some(prowlarr) = integrations.prowlarr
-        {
-            if let Some(value) = prowlarr.enabled {
-                self.integrations.prowlarr.enabled = value;
+        if let Some(integrations) = update.integrations {
+            if let Some(prowlarr) = integrations.prowlarr {
+                if let Some(value) = prowlarr.enabled {
+                    self.integrations.prowlarr.enabled = value;
+                }
+                if let Some(value) = prowlarr.sync_enabled {
+                    self.integrations.prowlarr.sync_enabled = value;
+                }
+                if let Some(value) = prowlarr.base_url {
+                    self.integrations.prowlarr.base_url = value;
+                }
+                if prowlarr.clear_api_key {
+                    self.integrations.prowlarr.api_key = None;
+                } else if let Some(value) = prowlarr.api_key {
+                    self.integrations.prowlarr.api_key = if value.is_empty() {
+                        self.integrations.prowlarr.api_key.clone()
+                    } else {
+                        Some(value)
+                    };
+                }
             }
-            if let Some(value) = prowlarr.sync_enabled {
-                self.integrations.prowlarr.sync_enabled = value;
-            }
-            if let Some(value) = prowlarr.base_url {
-                self.integrations.prowlarr.base_url = value;
-            }
-            if prowlarr.clear_api_key {
-                self.integrations.prowlarr.api_key = None;
-            } else if let Some(value) = prowlarr.api_key {
-                self.integrations.prowlarr.api_key = if value.is_empty() {
-                    self.integrations.prowlarr.api_key.clone()
-                } else {
-                    Some(value)
-                };
+
+            if let Some(audiobookshelf) = integrations.audiobookshelf {
+                if let Some(value) = audiobookshelf.enabled {
+                    self.integrations.audiobookshelf.enabled = value;
+                }
+                if let Some(value) = audiobookshelf.base_url {
+                    self.integrations.audiobookshelf.base_url = value;
+                }
+                if let Some(value) = audiobookshelf.library_id {
+                    self.integrations.audiobookshelf.library_id = value;
+                }
+                if audiobookshelf.clear_api_key {
+                    self.integrations.audiobookshelf.api_key = None;
+                } else if let Some(value) = audiobookshelf.api_key {
+                    self.integrations.audiobookshelf.api_key = if value.is_empty() {
+                        self.integrations.audiobookshelf.api_key.clone()
+                    } else {
+                        Some(value)
+                    };
+                }
             }
         }
 
@@ -439,6 +503,21 @@ impl PersistedRuntimeSettings {
                 .is_empty()
             {
                 anyhow::bail!("Prowlarr api key must not be empty when enabled");
+            }
+        }
+
+        let audiobookshelf = &self.integrations.audiobookshelf;
+        if audiobookshelf.enabled {
+            validate_url(&audiobookshelf.base_url, "Audiobookshelf base url")?;
+            require_non_empty(&audiobookshelf.library_id, "Audiobookshelf library id")?;
+            if audiobookshelf
+                .api_key
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            {
+                anyhow::bail!("Audiobookshelf api key must not be empty when enabled");
             }
         }
 

@@ -1,4 +1,8 @@
-#[derive(Clone, Debug, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ReleaseCandidate {
     pub external_id: String,
     pub source: String,
@@ -25,14 +29,16 @@ impl ReleaseCandidate {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ScoredCandidate {
     pub score: f32,
     pub explanation: Vec<String>,
     pub auto_acquire: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct ReviewQueueEntry {
     pub id: i64,
     pub request_id: String,

@@ -15,3 +15,51 @@ services:
             - ./data:/data/book-router
             - ./media/ebooks:/ebooks
             - ./media/audiobooks:/audiobooks
+    qbittorrent:
+        image: lscr.io/linuxserver/qbittorrent:latest
+        container_name: book-router-qbittorrent
+        profiles: ["acceptance"]
+        environment:
+            PUID: 1000
+            PGID: 1000
+            TZ: America/Los_Angeles
+            WEBUI_PORT: 8080
+        ports:
+            - "8080:8080"
+        volumes:
+            - ./data/acceptance/qbittorrent/config:/config
+            - ./data/acceptance/qbittorrent/downloads:/downloads
+    prowlarr:
+        image: lscr.io/linuxserver/prowlarr:latest
+        container_name: book-router-prowlarr
+        profiles: ["acceptance"]
+        environment:
+            PUID: 1000
+            PGID: 1000
+            TZ: America/Los_Angeles
+        ports:
+            - "9696:9696"
+        volumes:
+            - ./data/acceptance/prowlarr:/config
+    audiobookshelf:
+        image: ghcr.io/advplyr/audiobookshelf:latest
+        container_name: book-router-audiobookshelf
+        profiles: ["acceptance"]
+        ports:
+            - "13378:80"
+        volumes:
+            - ./data/acceptance/audiobookshelf/config:/config
+            - ./data/acceptance/audiobookshelf/metadata:/metadata
+            - ./media/audiobooks:/audiobooks
+    torznab-fixture:
+        image: wiremock/wiremock:3.13.1
+        container_name: book-router-torznab-fixture
+        profiles: ["acceptance"]
+        command:
+            - --global-response-templating
+            - --verbose
+        ports:
+            - "8088:8080"
+        volumes:
+            - ./docs/acceptance/torznab-wiremock/mappings:/home/wiremock/mappings:ro
+            - ./docs/acceptance/torznab-wiremock/__files:/home/wiremock/__files:ro

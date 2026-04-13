@@ -4,15 +4,37 @@ use crate::domain::search::ReleaseCandidate;
 
 #[derive(Clone)]
 pub struct TorznabClient {
-    base_url: String,
+    api_url: String,
     api_key: Option<String>,
     http: reqwest::Client,
 }
 
 impl TorznabClient {
     pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
+        Self::new_with_api_path(base_url, api_key, None::<String>)
+    }
+
+    pub fn new_with_api_path(
+        base_url: impl Into<String>,
+        api_key: Option<String>,
+        api_path: Option<impl Into<String>>,
+    ) -> Self {
+        let base_url = base_url.into();
+        let api_path = api_path
+            .map(Into::into)
+            .unwrap_or_else(|| "/api".to_string());
+        let api_url = format!(
+            "{}{}",
+            base_url.trim_end_matches('/'),
+            if api_path.starts_with('/') {
+                api_path
+            } else {
+                format!("/{api_path}")
+            }
+        );
+
         Self {
-            base_url: base_url.into(),
+            api_url,
             api_key,
             http: reqwest::Client::new(),
         }
@@ -21,7 +43,7 @@ impl TorznabClient {
     pub async fn search(&self, query: &str) -> anyhow::Result<Vec<ReleaseCandidate>> {
         let mut request = self
             .http
-            .get(format!("{}/api", self.base_url))
+            .get(&self.api_url)
             .query(&[("t", "search"), ("q", query)]);
 
         if let Some(api_key) = &self.api_key {

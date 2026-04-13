@@ -3,13 +3,15 @@ use axum::{Json, extract::State, http::StatusCode};
 use crate::{
     app::AppState,
     domain::settings::{
-        AcquisitionSettingsRecord, AcquisitionSettingsUpdate, ConnectionTestResult,
-        ImportSettingsRecord, ImportSettingsUpdate, PersistedRuntimeSettings,
-        ProwlarrIntegrationRecord, ProwlarrIntegrationUpdate, QbittorrentSettingsRecord,
-        QbittorrentSettingsUpdate, RuntimeSettingsRecord, RuntimeSettingsUpdate,
-        StorageSettingsRecord, StorageSettingsUpdate, SyncedIndexerRecord,
+        AcquisitionSettingsRecord, AcquisitionSettingsUpdate, AudiobookshelfIntegrationRecord,
+        AudiobookshelfIntegrationUpdate, ConnectionTestResult, ImportSettingsRecord,
+        ImportSettingsUpdate, PersistedRuntimeSettings, ProwlarrIntegrationRecord,
+        ProwlarrIntegrationUpdate, QbittorrentSettingsRecord, QbittorrentSettingsUpdate,
+        RuntimeSettingsRecord, RuntimeSettingsUpdate, StorageSettingsRecord,
+        StorageSettingsUpdate, SyncedIndexerRecord,
     },
     downloads::qbittorrent::QbittorrentClient,
+    sync::audiobookshelf::AudiobookshelfClient,
     http::error::AppError,
 };
 
@@ -177,11 +179,42 @@ pub async fn update_prowlarr_settings(
         .update_runtime_settings(RuntimeSettingsUpdate {
             integrations: Some(crate::domain::settings::IntegrationSettingsUpdate {
                 prowlarr: Some(payload),
+                ..Default::default()
             }),
             ..RuntimeSettingsUpdate::default()
         })
         .await?;
     Ok(Json(settings.integrations.prowlarr))
+}
+
+pub async fn get_audiobookshelf_settings(
+    State(state): State<AppState>,
+) -> Result<Json<AudiobookshelfIntegrationRecord>, AppError> {
+    Ok(Json(
+        state
+            .settings
+            .get_runtime_settings()
+            .await?
+            .integrations
+            .audiobookshelf,
+    ))
+}
+
+pub async fn update_audiobookshelf_settings(
+    State(state): State<AppState>,
+    Json(payload): Json<AudiobookshelfIntegrationUpdate>,
+) -> Result<Json<AudiobookshelfIntegrationRecord>, AppError> {
+    let settings = state
+        .settings
+        .update_runtime_settings(RuntimeSettingsUpdate {
+            integrations: Some(crate::domain::settings::IntegrationSettingsUpdate {
+                audiobookshelf: Some(payload),
+                ..Default::default()
+            }),
+            ..RuntimeSettingsUpdate::default()
+        })
+        .await?;
+    Ok(Json(settings.integrations.audiobookshelf))
 }
 
 pub async fn test_prowlarr_settings(
@@ -193,6 +226,7 @@ pub async fn test_prowlarr_settings(
         RuntimeSettingsUpdate {
             integrations: Some(crate::domain::settings::IntegrationSettingsUpdate {
                 prowlarr: Some(payload),
+                ..Default::default()
             }),
             ..RuntimeSettingsUpdate::default()
         },
@@ -241,6 +275,54 @@ pub async fn list_synced_indexers(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<SyncedIndexerRecord>>, AppError> {
     Ok(Json(state.settings.list_synced_indexers().await?))
+}
+
+pub async fn test_audiobookshelf_settings(
+    State(state): State<AppState>,
+    Json(payload): Json<AudiobookshelfIntegrationUpdate>,
+) -> Result<(StatusCode, Json<ConnectionTestResult>), AppError> {
+    let settings = preview_settings(
+        &state,
+        RuntimeSettingsUpdate {
+            integrations: Some(crate::domain::settings::IntegrationSettingsUpdate {
+                audiobookshelf: Some(payload),
+                ..Default::default()
+            }),
+            ..RuntimeSettingsUpdate::default()
+        },
+    )
+    .await?;
+    let audiobookshelf = settings.integrations.audiobookshelf;
+
+    if !audiobookshelf.enabled {
+        return Ok((
+            StatusCode::OK,
+            Json(ConnectionTestResult {
+                ok: true,
+                message: "Audiobookshelf integration is disabled".to_string(),
+            }),
+        ));
+    }
+
+    let client = AudiobookshelfClient::new(
+        audiobookshelf.base_url,
+        audiobookshelf.api_key.unwrap_or_default(),
+    );
+    client
+        .scan_library(&audiobookshelf.library_id)
+        .send()
+        .await
+        .map_err(anyhow::Error::from)?
+        .error_for_status()
+        .map_err(anyhow::Error::from)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ConnectionTestResult {
+            ok: true,
+            message: "Audiobookshelf connection succeeded".to_string(),
+        }),
+    ))
 }
 
 async fn preview_settings(

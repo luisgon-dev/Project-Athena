@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::events::RequestEventRecord;
+use super::search::ReviewQueueEntry;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -130,9 +131,10 @@ pub struct CreateRequestSelection {
     pub manifestation: ManifestationPreference,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RequestDetailRecord {
     pub request: RequestRecord,
     pub events: Vec<RequestEventRecord>,
+    pub review_queue: Vec<ReviewQueueEntry>,
 }

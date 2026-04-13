@@ -7,15 +7,26 @@ pub fn score_candidate(request: &RequestRecord, candidate: &ReleaseCandidate) ->
     let mut score = 0.0;
     let mut explanation = Vec::new();
     let candidate_title = candidate.title.to_lowercase();
+    let normalized_candidate = normalize(&candidate.title);
+    let normalized_request_title = normalize(&request.title);
 
-    if normalized_eq(&request.title, &candidate.title) {
-        score += 0.45;
+    if normalized_candidate.contains(&normalized_request_title) {
+        score += 0.50;
         explanation.push("title matched".to_string());
     }
 
     if candidate_title.contains(&request.author.to_lowercase()) {
         score += 0.25;
         explanation.push("author matched".to_string());
+    }
+
+    if matches!(request.media_type, crate::domain::requests::MediaType::Ebook)
+        && (candidate_title.contains("epub")
+            || candidate_title.contains("pdf")
+            || candidate_title.contains("azw3"))
+    {
+        score += 0.20;
+        explanation.push("ebook format matched".to_string());
     }
 
     if matches!(
@@ -39,10 +50,6 @@ pub fn score_candidate(request: &RequestRecord, candidate: &ReleaseCandidate) ->
         explanation,
         auto_acquire: score >= 0.90,
     }
-}
-
-fn normalized_eq(left: &str, right: &str) -> bool {
-    normalize(left) == normalize(right)
 }
 
 fn normalize(value: &str) -> String {

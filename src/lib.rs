@@ -5,6 +5,7 @@ pub mod domain;
 pub mod downloads;
 pub mod http;
 pub mod importer;
+pub mod library_scanner;
 pub mod matcher;
 pub mod metadata;
 pub mod search;

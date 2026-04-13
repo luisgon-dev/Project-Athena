@@ -8,7 +8,7 @@ use book_router::{
         search::ReleaseCandidate,
     },
     downloads::qbittorrent::QbittorrentClient,
-    sync::calibre::CalibreHook,
+    sync::{audiobookshelf::AudiobookshelfClient, calibre::CalibreHook},
     workers::{
         download_worker::DownloadWorker, import_worker::ImportWorker, sync_worker::SyncWorker,
     },
@@ -264,9 +264,17 @@ async fn ebook_request_dispatches_to_qbittorrent_and_completes_via_polling() {
     write_fake_calibre(&script_path, &log_path);
     let hook = CalibreHook::new(&script_path);
 
-    let processed = DownloadWorker::poll_qbittorrent_once(&repo, &client, &ebooks_root, &hook)
-        .await
-        .unwrap();
+    let processed = DownloadWorker::poll_qbittorrent_once(
+        &repo,
+        &client,
+        &ebooks_root,
+        &tempdir.path().join("audiobooks"),
+        &hook,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(processed, 1);
 
@@ -302,4 +310,116 @@ async fn ebook_request_dispatches_to_qbittorrent_and_completes_via_polling() {
             .any(|event| event.kind.as_str() == "sync.succeeded")
     );
     assert!(log.contains(final_path.to_string_lossy().as_ref()));
+}
+
+#[tokio::test]
+async fn audiobook_request_dispatches_imports_and_syncs_with_audiobookshelf() {
+    let pool = connect_sqlite(&DatabaseTarget::memory()).await.unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let repo = SqliteRequestRepository::new(pool);
+    let tempdir = tempfile::tempdir().unwrap();
+    let downloads_root = tempdir.path().join("downloads");
+    let ebooks_root = tempdir.path().join("ebooks");
+    let audiobooks_root = tempdir.path().join("audiobooks");
+    fs::create_dir_all(&downloads_root).unwrap();
+    fs::create_dir_all(&ebooks_root).unwrap();
+    fs::create_dir_all(&audiobooks_root).unwrap();
+
+    let request = repo
+        .create(CreateRequest {
+            external_work_id: "OL27448W".into(),
+            title: "The Hobbit".into(),
+            author: "J.R.R. Tolkien".into(),
+            media_type: MediaType::Audiobook,
+            preferred_language: Some("en".into()),
+            manifestation: ManifestationPreference::default(),
+        })
+        .await
+        .unwrap();
+
+    let source_file = downloads_root.join("The Hobbit.m4b");
+    fs::write(&source_file, b"audiobook payload").unwrap();
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/auth/login"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("set-cookie", "SID=test-session; HttpOnly; Path=/"),
+        )
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v2/torrents/add"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v2/torrents/info"))
+        .and(query_param("category", "athena-audiobooks"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            format!(
+                r#"[
+                    {{
+                        "hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "name":"The Hobbit",
+                        "category":"athena-audiobooks",
+                        "tags":"{request_id}",
+                        "progress":1.0,
+                        "state":"uploading",
+                        "content_path":"{content_path}"
+                    }}
+                ]"#,
+                request_id = request.id,
+                content_path = source_file.display()
+            ),
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let abs_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/libraries/library-1/scan"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&abs_server)
+        .await;
+
+    let candidate = ReleaseCandidate {
+        external_id: "candidate-audio".into(),
+        source: "prowlarr".into(),
+        title: "The Hobbit M4B".into(),
+        protocol: "torrent".into(),
+        size_bytes: 1234,
+        indexer: "Books".into(),
+        download_url: Some(
+            "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&dn=The+Hobbit".into(),
+        ),
+    };
+    let client = QbittorrentClient::new(server.uri(), "admin", "adminadmin");
+    DownloadWorker::dispatch_approved_candidate(&repo, &client, &request.id, &candidate)
+        .await
+        .unwrap();
+
+    let processed = DownloadWorker::poll_qbittorrent_once(
+        &repo,
+        &client,
+        &ebooks_root,
+        &audiobooks_root,
+        &CalibreHook::new("/usr/bin/false"),
+        Some(&AudiobookshelfClient::new(abs_server.uri(), "abs-key")),
+        Some("library-1"),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(processed, 1);
+    let updated = repo.find_by_id(&request.id).await.unwrap().unwrap();
+    let final_dir = audiobooks_root.join("J.R.R. Tolkien").join("The Hobbit");
+
+    assert_eq!(updated.state, "synced");
+    assert!(final_dir.exists());
+    assert!(!source_file.exists());
 }

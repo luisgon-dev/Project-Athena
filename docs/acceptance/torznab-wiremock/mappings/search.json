@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/api",
+    "queryParameters": {
+      "t": {
+        "equalTo": "search"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/xml; charset=utf-8"
+    },
+    "bodyFileName": "torznab-search.xml"
+  }
+}

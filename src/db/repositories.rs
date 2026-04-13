@@ -28,6 +28,17 @@ pub struct QueuedDownloadRecord {
     pub category: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchIndexerRecord {
+    pub id: i64,
+    pub implementation: String,
+    pub protocol: Option<String>,
+    pub base_url: String,
+    pub api_path: Option<String>,
+    pub api_key: Option<String>,
+    pub enabled: bool,
+}
+
 impl SqliteRequestRepository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
@@ -233,6 +244,128 @@ impl SqliteRequestRepository {
             .collect()
     }
 
+    pub async fn list_pending_search_requests(&self) -> Result<Vec<RequestRecord>> {
+        let rows = sqlx::query(
+            "SELECT id
+             FROM requests
+             WHERE state IN ('requested', 'no_match')
+             ORDER BY datetime(created_at) ASC, id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut requests = Vec::with_capacity(rows.len());
+        for row in rows {
+            let request_id = row.get::<String, _>("id");
+            let request = self
+                .find_by_id(&request_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("request {request_id} disappeared during search scan"))?;
+            requests.push(request);
+        }
+
+        Ok(requests)
+    }
+
+    pub async fn update_state(&self, request_id: &str, state: &str) -> Result<()> {
+        sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
+            .bind(state)
+            .bind(request_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn mark_search_completed(
+        &self,
+        request_id: &str,
+        outcome: &str,
+        candidates_seen: usize,
+        qualified_candidates: usize,
+        top_score: Option<f32>,
+    ) -> Result<()> {
+        let next_state = match outcome {
+            "auto_acquire" => "queued",
+            "review" => "review",
+            "no_match" => "no_match",
+            _ => "requested",
+        };
+        self.update_state(request_id, next_state).await?;
+        self.append_event(
+            request_id,
+            RequestEventKind::SearchCompleted,
+            json!({
+                "outcome": outcome,
+                "candidates_seen": candidates_seen,
+                "qualified_candidates": qualified_candidates,
+                "top_score": top_score,
+            }),
+        )
+        .await
+    }
+
+    pub async fn mark_review_queued(
+        &self,
+        request_id: &str,
+        queued_candidates: usize,
+        top_score: Option<f32>,
+    ) -> Result<()> {
+        self.update_state(request_id, "review").await?;
+        self.append_event(
+            request_id,
+            RequestEventKind::ReviewQueued,
+            json!({
+                "queued_candidates": queued_candidates,
+                "top_score": top_score,
+            }),
+        )
+        .await
+    }
+
+    pub async fn clear_review_queue(&self, request_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM review_queue WHERE request_id = ?")
+            .bind(request_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn add_rejected_candidate(
+        &self,
+        request_id: &str,
+        candidate_external_id: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO rejected_candidates (request_id, candidate_external_id)
+             VALUES (?, ?)",
+        )
+        .bind(request_id)
+        .bind(candidate_external_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn rejected_candidate_ids(&self, request_id: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT candidate_external_id
+             FROM rejected_candidates
+             WHERE request_id = ?",
+        )
+        .bind(request_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| row.get::<String, _>("candidate_external_id"))
+            .collect()
+        )
+    }
+
     pub async fn enqueue_review_candidate(
         &self,
         request_id: &str,
@@ -248,9 +381,10 @@ impl SqliteRequestRepository {
                 candidate_protocol,
                 candidate_size_bytes,
                 candidate_indexer,
+                candidate_download_url,
                 score,
                 explanation_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(request_id)
         .bind(&candidate.external_id)
@@ -259,6 +393,7 @@ impl SqliteRequestRepository {
         .bind(&candidate.protocol)
         .bind(candidate.size_bytes)
         .bind(&candidate.indexer)
+        .bind(candidate.download_url.as_deref())
         .bind(scored.score)
         .bind(serde_json::to_string(&scored.explanation)?)
         .execute(&self.pool)
@@ -278,6 +413,7 @@ impl SqliteRequestRepository {
                 candidate_protocol,
                 candidate_size_bytes,
                 candidate_indexer,
+                candidate_download_url,
                 score,
                 explanation_json,
                 created_at
@@ -301,7 +437,7 @@ impl SqliteRequestRepository {
                         protocol: row.get::<String, _>("candidate_protocol"),
                         size_bytes: row.get::<i64, _>("candidate_size_bytes"),
                         indexer: row.get::<String, _>("candidate_indexer"),
-                        download_url: None,
+                        download_url: row.get::<Option<String>, _>("candidate_download_url"),
                     },
                     score: row.get::<f32, _>("score"),
                     explanation: serde_json::from_str(
@@ -311,6 +447,100 @@ impl SqliteRequestRepository {
                 })
             })
             .collect()
+    }
+
+    pub async fn review_candidate_for_action(
+        &self,
+        request_id: &str,
+        candidate_id: i64,
+    ) -> Result<Option<ReviewQueueEntry>> {
+        let row = sqlx::query(
+            "SELECT
+                id,
+                request_id,
+                candidate_external_id,
+                candidate_source,
+                candidate_title,
+                candidate_protocol,
+                candidate_size_bytes,
+                candidate_indexer,
+                candidate_download_url,
+                score,
+                explanation_json,
+                created_at
+             FROM review_queue
+             WHERE request_id = ? AND id = ?",
+        )
+        .bind(request_id)
+        .bind(candidate_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(ReviewQueueEntry {
+                id: row.get::<i64, _>("id"),
+                request_id: row.get::<String, _>("request_id"),
+                candidate: ReleaseCandidate {
+                    external_id: row.get::<String, _>("candidate_external_id"),
+                    source: row.get::<String, _>("candidate_source"),
+                    title: row.get::<String, _>("candidate_title"),
+                    protocol: row.get::<String, _>("candidate_protocol"),
+                    size_bytes: row.get::<i64, _>("candidate_size_bytes"),
+                    indexer: row.get::<String, _>("candidate_indexer"),
+                    download_url: row.get::<Option<String>, _>("candidate_download_url"),
+                },
+                score: row.get::<f32, _>("score"),
+                explanation: serde_json::from_str(
+                    row.get::<String, _>("explanation_json").as_str(),
+                )?,
+                created_at: row.get::<String, _>("created_at"),
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn remove_review_candidate(&self, request_id: &str, candidate_id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM review_queue WHERE request_id = ? AND id = ?")
+            .bind(request_id)
+            .bind(candidate_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn mark_review_approved(
+        &self,
+        request_id: &str,
+        candidate_id: i64,
+        candidate_external_id: &str,
+    ) -> Result<()> {
+        self.append_event(
+            request_id,
+            RequestEventKind::ReviewApproved,
+            json!({
+                "candidate_id": candidate_id,
+                "candidate_external_id": candidate_external_id,
+            }),
+        )
+        .await
+    }
+
+    pub async fn mark_review_rejected(
+        &self,
+        request_id: &str,
+        candidate_id: i64,
+        candidate_external_id: &str,
+    ) -> Result<()> {
+        self.append_event(
+            request_id,
+            RequestEventKind::ReviewRejected,
+            json!({
+                "candidate_id": candidate_id,
+                "candidate_external_id": candidate_external_id,
+            }),
+        )
+        .await
     }
 
     pub async fn queue_download(
@@ -419,8 +649,9 @@ impl SqliteRequestRepository {
         request_id: &str,
         destination_path: &std::path::Path,
     ) -> Result<()> {
-        sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
+        sqlx::query("UPDATE requests SET state = ?, imported_path = ? WHERE id = ?")
             .bind("imported")
+            .bind(destination_path.display().to_string())
             .bind(request_id)
             .execute(&self.pool)
             .await?;
@@ -457,6 +688,228 @@ impl SqliteRequestRepository {
             json!({ "target_path": target_path }),
         )
         .await
+    }
+
+    pub async fn find_request_by_imported_path(
+        &self,
+        path: &str,
+        media_type: &str,
+    ) -> Result<Option<RequestRecord>> {
+        let row = sqlx::query(
+            "SELECT id, external_work_id, title, author, media_type, preferred_language, state, created_at
+             FROM requests
+             WHERE imported_path = ? AND media_type = ?",
+        )
+        .bind(path)
+        .bind(media_type)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let request_id: String = row.get("id");
+        let payload_json = sqlx::query(
+            "SELECT payload_json FROM request_events WHERE request_id = ? ORDER BY id ASC LIMIT 1",
+        )
+        .bind(&request_id)
+        .fetch_one(&self.pool)
+        .await?
+        .get::<String, _>("payload_json");
+
+        let payload: serde_json::Value = serde_json::from_str(&payload_json)?;
+        let manifestation = manifestation_from_payload(&payload);
+
+        Ok(Some(RequestRecord {
+            id: request_id,
+            external_work_id: row.get::<String, _>("external_work_id"),
+            title: row.get::<String, _>("title"),
+            author: row.get::<String, _>("author"),
+            media_type: match crate::domain::requests::MediaType::from_str(
+                row.get::<String, _>("media_type").as_str(),
+            ) {
+                Some(media_type) => media_type,
+                None => anyhow::bail!("unknown media type stored in requests"),
+            },
+            preferred_language: row.get::<Option<String>, _>("preferred_language"),
+            manifestation,
+            state: row.get::<String, _>("state"),
+            created_at: row.get::<String, _>("created_at"),
+        }))
+    }
+
+    pub async fn find_request_by_title_author(
+        &self,
+        title: &str,
+        author: &str,
+        media_type: &str,
+    ) -> Result<Option<RequestRecord>> {
+        let row = sqlx::query(
+            "SELECT id, external_work_id, title, author, media_type, preferred_language, state, created_at
+             FROM requests
+             WHERE title = ? AND author = ? AND media_type = ?",
+        )
+        .bind(title)
+        .bind(author)
+        .bind(media_type)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let request_id: String = row.get("id");
+        let payload_json = sqlx::query(
+            "SELECT payload_json FROM request_events WHERE request_id = ? ORDER BY id ASC LIMIT 1",
+        )
+        .bind(&request_id)
+        .fetch_one(&self.pool)
+        .await?
+        .get::<String, _>("payload_json");
+
+        let payload: serde_json::Value = serde_json::from_str(&payload_json)?;
+        let manifestation = manifestation_from_payload(&payload);
+
+        Ok(Some(RequestRecord {
+            id: request_id,
+            external_work_id: row.get::<String, _>("external_work_id"),
+            title: row.get::<String, _>("title"),
+            author: row.get::<String, _>("author"),
+            media_type: match crate::domain::requests::MediaType::from_str(
+                row.get::<String, _>("media_type").as_str(),
+            ) {
+                Some(media_type) => media_type,
+                None => anyhow::bail!("unknown media type stored in requests"),
+            },
+            preferred_language: row.get::<Option<String>, _>("preferred_language"),
+            manifestation,
+            state: row.get::<String, _>("state"),
+            created_at: row.get::<String, _>("created_at"),
+        }))
+    }
+
+    pub async fn create_library_discovered_request(
+        &self,
+        item: &crate::domain::library::ScannedItem,
+    ) -> Result<RequestRecord> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let media_type = item.media_type.as_str();
+
+        sqlx::query(
+            "INSERT INTO requests (id, external_work_id, title, author, media_type, preferred_language, state, imported_path, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+        )
+        .bind(&id)
+        .bind("")
+        .bind(&item.title)
+        .bind(&item.author)
+        .bind(media_type)
+        .bind::<Option<&str>>(None)
+        .bind("imported")
+        .bind(&item.imported_path)
+        .execute(&self.pool)
+        .await?;
+
+        let payload_json = json!({
+            "request_id": id,
+            "external_work_id": "",
+            "work": {
+                "external_id": "",
+                "title": &item.title,
+                "author": &item.author,
+            },
+            "title": &item.title,
+            "author": &item.author,
+            "media_type": media_type,
+            "preferred_language": null,
+            "manifestation": {
+                "edition_title": null,
+                "preferred_narrator": null,
+                "preferred_publisher": null,
+                "graphic_audio": false,
+            },
+            "imported_path": &item.imported_path,
+        })
+        .to_string();
+
+        sqlx::query(
+            "INSERT INTO request_events (request_id, kind, payload_json, created_at)
+             VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+        )
+        .bind(&id)
+        .bind(RequestEventKind::LibraryDiscovered.as_str())
+        .bind(payload_json)
+        .execute(&self.pool)
+        .await?;
+
+        self.find_by_id(&id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("freshly created library request disappeared"))
+    }
+
+    pub async fn create_scan_job(&self) -> Result<i64> {
+        let row = sqlx::query(
+            "INSERT INTO library_scan_jobs (started_at)
+             VALUES (CURRENT_TIMESTAMP)
+             RETURNING id",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row.get::<i64, _>("id"))
+    }
+
+    pub async fn complete_scan_job(
+        &self,
+        job_id: i64,
+        ebooks_found: i64,
+        audiobooks_found: i64,
+        duplicates_skipped: i64,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE library_scan_jobs
+             SET completed_at = CURRENT_TIMESTAMP,
+                 ebooks_found = ?,
+                 audiobooks_found = ?,
+                 duplicates_skipped = ?,
+                 error_message = ?
+             WHERE id = ?",
+        )
+        .bind(ebooks_found)
+        .bind(audiobooks_found)
+        .bind(duplicates_skipped)
+        .bind(error_message)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn latest_scan_job(
+        &self,
+    ) -> Result<Option<crate::domain::library::LibraryScanJobRecord>> {
+        let row = sqlx::query(
+            "SELECT id, started_at, completed_at, ebooks_found, audiobooks_found, duplicates_skipped, error_message
+             FROM library_scan_jobs
+             ORDER BY id DESC
+             LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| crate::domain::library::LibraryScanJobRecord {
+            id: row.get::<i64, _>("id"),
+            started_at: row.get::<String, _>("started_at"),
+            completed_at: row.get::<Option<String>, _>("completed_at"),
+            ebooks_found: row.get::<i64, _>("ebooks_found"),
+            audiobooks_found: row.get::<i64, _>("audiobooks_found"),
+            duplicates_skipped: row.get::<i64, _>("duplicates_skipped"),
+            error_message: row.get::<Option<String>, _>("error_message"),
+        }))
     }
 
     async fn append_event(
@@ -551,6 +1004,37 @@ impl SqliteSettingsRepository {
         .await?;
 
         rows.into_iter().map(row_to_synced_indexer_record).collect()
+    }
+
+    pub async fn list_search_indexers(&self) -> Result<Vec<SearchIndexerRecord>> {
+        let rows = sqlx::query(
+            "SELECT
+                id,
+                implementation,
+                protocol,
+                base_url,
+                api_path,
+                api_key,
+                enabled
+             FROM synced_indexers
+             WHERE enabled = 1 AND base_url IS NOT NULL
+             ORDER BY id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| SearchIndexerRecord {
+                id: row.get::<i64, _>("id"),
+                implementation: row.get::<String, _>("implementation"),
+                protocol: row.get::<Option<String>, _>("protocol"),
+                base_url: row.get::<String, _>("base_url"),
+                api_path: row.get::<Option<String>, _>("api_path"),
+                api_key: row.get::<Option<String>, _>("api_key"),
+                enabled: row.get::<bool, _>("enabled"),
+            })
+            .collect())
     }
 
     pub async fn get_synced_indexer_resource(&self, id: i64) -> Result<Option<Value>> {

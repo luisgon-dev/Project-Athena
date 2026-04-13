@@ -5,6 +5,7 @@
 		Cable,
 		Database,
 		Download,
+		Headphones,
 		FolderTree,
 		LoaderCircle,
 		ShieldCheck
@@ -30,6 +31,17 @@
 		const prowlarr = runtime.integrations.prowlarr;
 		if (!prowlarr.enabled && !prowlarr.sync_enabled) return 'Disabled';
 		if (prowlarr.base_url && prowlarr.has_api_key) return 'Configured';
+		return 'Incomplete';
+	}
+
+	function audiobookshelfStatus(): string {
+		if (!runtime) return 'Loading';
+		const audiobookshelf = runtime.integrations.audiobookshelf;
+		if (!audiobookshelf) return 'Disabled';
+		if (!audiobookshelf.enabled) return 'Disabled';
+		if (audiobookshelf.base_url && audiobookshelf.library_id && audiobookshelf.has_api_key) {
+			return 'Configured';
+		}
 		return 'Incomplete';
 	}
 
@@ -70,6 +82,12 @@
 			title: 'Prowlarr',
 			body: 'Application sync settings and connection testing for the Readarr-compatible surface.',
 			icon: Cable
+		},
+		{
+			href: '/settings/integrations/audiobookshelf',
+			title: 'Audiobookshelf',
+			body: 'Audiobook library scan settings used after import completion.',
+			icon: Headphones
 		},
 		{
 			href: '/settings/storage',
@@ -137,6 +155,16 @@
 					<p class="mt-2 text-sm text-stone-600">Audiobooks root: {runtime.storage.audiobooks_root}</p>
 				</div>
 				<div class="dashboard-card">
+					<p class="eyebrow mb-4 bg-sky-500/12 text-sky-900">
+						<Headphones class="h-4 w-4" />
+						<span>Audiobookshelf</span>
+					</p>
+					<p class="font-serif text-3xl text-stone-950">{audiobookshelfStatus()}</p>
+					<p class="mt-2 text-sm text-stone-600">
+						{runtime.integrations.audiobookshelf?.base_url || 'No Audiobookshelf URL saved yet.'}
+					</p>
+				</div>
+				<div class="dashboard-card">
 					<p class="eyebrow mb-4 bg-stone-900/8 text-stone-900">
 						<ShieldCheck class="h-4 w-4" />
 						<span>Synced indexers</span>
@@ -146,7 +174,7 @@
 				</div>
 			</div>
 
-			<div class="grid gap-4 lg:grid-cols-2">
+			<div class="grid gap-4 xl:grid-cols-3">
 				{#each cards as card}
 					<a class="dashboard-card group transition hover:-translate-y-0.5 hover:border-teal-900/25" href={card.href}>
 						<div class="flex items-start justify-between gap-4">

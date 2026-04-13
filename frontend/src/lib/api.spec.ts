@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CreateRequestSelection } from '$lib/types/CreateRequestSelection';
 import {
+	approveReviewCandidate,
 	createRequests,
+	getAudiobookshelfSettings,
 	getQbittorrentSettings,
 	getRequestDetail,
 	listRequests,
 	listSyncedIndexers,
+	rejectReviewCandidate,
+	retryRequestSearch,
 	searchRequests,
+	testAudiobookshelfSettings,
 	testProwlarrSettings,
+	updateAudiobookshelfSettings,
 	updateStorageSettings
 } from './api';
 
@@ -208,6 +214,182 @@ describe('api client', () => {
 				clear_api_key: false
 			})
 		});
+		expect(result.ok).toBe(true);
+	});
+
+	it('posts request review actions and retry search actions', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn()
+				.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							request: {
+								id: 'req-1',
+								external_work_id: 'OL27448W',
+								title: 'The Hobbit',
+								author: 'J.R.R. Tolkien',
+								media_type: 'Ebook',
+								preferred_language: 'en',
+								manifestation: {
+									edition_title: null,
+									preferred_narrator: null,
+									preferred_publisher: null,
+									graphic_audio: false
+								},
+								state: 'review',
+								created_at: '2026-04-10 00:00:00'
+							},
+							events: [],
+							review_queue: []
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
+				)
+				.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							request: {
+								id: 'req-1',
+								external_work_id: 'OL27448W',
+								title: 'The Hobbit',
+								author: 'J.R.R. Tolkien',
+								media_type: 'Ebook',
+								preferred_language: 'en',
+								manifestation: {
+									edition_title: null,
+									preferred_narrator: null,
+									preferred_publisher: null,
+									graphic_audio: false
+								},
+								state: 'no_match',
+								created_at: '2026-04-10 00:00:00'
+							},
+							events: [],
+							review_queue: []
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
+				)
+				.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							request: {
+								id: 'req-1',
+								external_work_id: 'OL27448W',
+								title: 'The Hobbit',
+								author: 'J.R.R. Tolkien',
+								media_type: 'Ebook',
+								preferred_language: 'en',
+								manifestation: {
+									edition_title: null,
+									preferred_narrator: null,
+									preferred_publisher: null,
+									graphic_audio: false
+								},
+								state: 'requested',
+								created_at: '2026-04-10 00:00:00'
+							},
+							events: [],
+							review_queue: []
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
+				)
+		);
+
+		await approveReviewCandidate('req-1', 5n);
+		await rejectReviewCandidate('req-1', 5n);
+		await retryRequestSearch('req-1');
+
+		expect(fetch).toHaveBeenNthCalledWith(
+			1,
+			'/api/v1/requests/req-1/review-queue/5/approve',
+			{ method: 'POST' }
+		);
+		expect(fetch).toHaveBeenNthCalledWith(
+			2,
+			'/api/v1/requests/req-1/review-queue/5/reject',
+			{ method: 'POST' }
+		);
+		expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/requests/req-1/retry-search', {
+			method: 'POST'
+		});
+	});
+
+	it('loads and updates Audiobookshelf integration settings', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn()
+				.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							enabled: true,
+							base_url: 'http://localhost:13378',
+							library_id: 'lib-1',
+							has_api_key: true
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
+				)
+				.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							enabled: true,
+							base_url: 'http://localhost:13378',
+							library_id: 'lib-1',
+							has_api_key: true
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
+				)
+				.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							ok: true,
+							message: 'Audiobookshelf connection succeeded'
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
+				)
+		);
+
+		const payload = {
+			enabled: true,
+			base_url: 'http://localhost:13378',
+			library_id: 'lib-1',
+			api_key: 'secret',
+			clear_api_key: false
+		};
+
+		const settings = await getAudiobookshelfSettings();
+		await updateAudiobookshelfSettings(payload);
+		const result = await testAudiobookshelfSettings(payload);
+
+		expect(settings.library_id).toBe('lib-1');
+		expect(fetch).toHaveBeenNthCalledWith(
+			1,
+			'/api/v1/settings/integrations/audiobookshelf',
+			undefined
+		);
+		expect(fetch).toHaveBeenNthCalledWith(
+			2,
+			'/api/v1/settings/integrations/audiobookshelf',
+			{
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(payload)
+			}
+		);
+		expect(fetch).toHaveBeenNthCalledWith(
+			3,
+			'/api/v1/settings/integrations/audiobookshelf/test',
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(payload)
+			}
+		);
 		expect(result.ok).toBe(true);
 	});
 });

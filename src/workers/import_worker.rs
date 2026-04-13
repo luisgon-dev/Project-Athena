@@ -53,6 +53,53 @@ impl ImportWorker {
 
         Ok(destination)
     }
+
+    pub async fn import_completed_audiobook(
+        repo: &SqliteRequestRepository,
+        request_id: &str,
+        files: &[String],
+        audiobooks_root: &Path,
+    ) -> Result<PathBuf> {
+        let request = repo
+            .find_by_id(request_id)
+            .await?
+            .with_context(|| format!("request {request_id} not found"))?;
+
+        if request.media_type != MediaType::Audiobook {
+            bail!("request {request_id} is not an audiobook request");
+        }
+
+        let classification = classify_payload(files);
+        if classification.media_type != ImportMediaType::Audiobook {
+            bail!("download payload was not classified as audiobook");
+        }
+
+        let source_paths = files.iter().map(PathBuf::from).collect::<Vec<_>>();
+        let destination_dir = audiobooks_root.join(sanitize_segment(&request.author)).join(sanitize_segment(&request.title));
+        let common_root = common_parent_dir(&source_paths)
+            .context("audiobook payload did not have a common source root")?;
+
+        for source in &source_paths {
+            let relative = source
+                .strip_prefix(&common_root)
+                .ok()
+                .filter(|path| !path.as_os_str().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    source
+                        .file_name()
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("audio.bin"))
+                });
+            let destination = destination_dir.join(sanitize_relative_path(&relative));
+            move_file(source, &destination)?;
+        }
+
+        repo.complete_download(request_id, files).await?;
+        repo.mark_import_succeeded(request_id, &destination_dir).await?;
+
+        Ok(destination_dir)
+    }
 }
 
 fn move_file(source: &Path, destination: &Path) -> Result<()> {
@@ -69,4 +116,45 @@ fn move_file(source: &Path, destination: &Path) -> Result<()> {
         }
         Err(error) => Err(error.into()),
     }
+}
+
+fn common_parent_dir(paths: &[PathBuf]) -> Option<PathBuf> {
+    let first_parent = paths.first()?.parent()?.to_path_buf();
+    let mut common = first_parent;
+
+    while !paths
+        .iter()
+        .all(|path| path.starts_with(&common))
+    {
+        common = common.parent()?.to_path_buf();
+    }
+
+    Some(common)
+}
+
+fn sanitize_relative_path(path: &Path) -> PathBuf {
+    let mut sanitized = PathBuf::new();
+    for component in path.components() {
+        let segment = component.as_os_str().to_string_lossy();
+        sanitized.push(sanitize_segment(&segment));
+    }
+    sanitized
+}
+
+fn sanitize_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_control() || matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
 }

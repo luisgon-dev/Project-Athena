@@ -5,18 +5,34 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use std::time::Duration;
 
 use crate::{
-    db::repositories::SqliteRequestRepository,
+    db::repositories::{SqliteRequestRepository, SqliteSettingsRepository},
     domain::{requests::MediaType, search::ReleaseCandidate},
     downloads::qbittorrent::{QbittorrentClient, QbittorrentTorrent},
-    sync::calibre::CalibreHook,
+    sync::{audiobookshelf::AudiobookshelfClient, calibre::CalibreHook},
     workers::{import_worker::ImportWorker, sync_worker::SyncWorker},
 };
 
 pub struct DownloadWorker;
 
 impl DownloadWorker {
+    pub fn spawn(
+        pool: sqlx::SqlitePool,
+        settings: SqliteSettingsRepository,
+        interval: Duration,
+    ) {
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) = Self::poll_once(pool.clone(), settings.clone()).await {
+                    tracing::error!(error = %error, "download worker iteration failed");
+                }
+                tokio::time::sleep(interval).await;
+            }
+        });
+    }
+
     pub async fn record_approved_candidate(
         repo: &SqliteRequestRepository,
         request_id: &str,
@@ -58,7 +74,10 @@ impl DownloadWorker {
         repo: &SqliteRequestRepository,
         client: &QbittorrentClient,
         ebooks_root: &Path,
+        audiobooks_root: &Path,
         calibre_hook: &CalibreHook,
+        audiobookshelf_client: Option<&AudiobookshelfClient>,
+        audiobookshelf_library_id: Option<&str>,
     ) -> Result<usize> {
         let queued = repo.queued_downloads().await?;
         let mut processed = 0usize;
@@ -107,12 +126,74 @@ impl DownloadWorker {
                     processed += 1;
                 }
                 MediaType::Audiobook => {
-                    bail!("qBittorrent polling for audiobook imports is not implemented yet")
+                    let imported_path = ImportWorker::import_completed_audiobook(
+                        repo,
+                        &download.request_id,
+                        &files,
+                        audiobooks_root,
+                    )
+                    .await?;
+                    let client = audiobookshelf_client
+                        .context("Audiobookshelf client is not configured for audiobook sync")?;
+                    let library_id = audiobookshelf_library_id
+                        .context("Audiobookshelf library id is not configured")?;
+                    SyncWorker::sync_audiobook(
+                        repo,
+                        &download.request_id,
+                        &imported_path,
+                        client,
+                        library_id,
+                    )
+                    .await?;
+                    processed += 1;
                 }
             }
         }
 
         Ok(processed)
+    }
+
+    pub async fn poll_once(
+        pool: sqlx::SqlitePool,
+        settings_repo: SqliteSettingsRepository,
+    ) -> Result<usize> {
+        let settings = settings_repo
+            .get_persisted_runtime_settings()
+            .await?
+            .context("runtime settings row missing")?;
+        let qb = &settings.download_clients.qbittorrent;
+        if !qb.enabled {
+            return Ok(0);
+        }
+
+        let client = QbittorrentClient::new(
+            &qb.base_url,
+            &qb.username,
+            qb.password.clone().unwrap_or_default(),
+        );
+        let calibre_hook = CalibreHook::new(&settings.import.calibre_command);
+        let audiobookshelf = settings.integrations.audiobookshelf.enabled.then(|| {
+            AudiobookshelfClient::new(
+                &settings.integrations.audiobookshelf.base_url,
+                settings
+                    .integrations
+                    .audiobookshelf
+                    .api_key
+                    .clone()
+                    .unwrap_or_default(),
+            )
+        });
+
+        Self::poll_qbittorrent_once(
+            &SqliteRequestRepository::new(pool),
+            &client,
+            Path::new(&settings.storage.ebooks_root),
+            Path::new(&settings.storage.audiobooks_root),
+            &calibre_hook,
+            audiobookshelf.as_ref(),
+            Some(&settings.integrations.audiobookshelf.library_id),
+        )
+        .await
     }
 }
 

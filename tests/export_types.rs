@@ -1,12 +1,15 @@
 use book_router::domain::{
     catalog::{ResolvedWork, WorkRecord, WorkSearch},
     events::{RequestEventKind, RequestEventRecord},
+    library::{LibraryScanJobRecord, LibraryScanResponse},
     requests::{
         CreateRequest, CreateRequestSelection, ManifestationPreference, MediaType,
         RequestDetailRecord, RequestListRecord, RequestRecord,
     },
+    search::{ReleaseCandidate, ReviewQueueEntry},
     settings::{
         AcquisitionSettingsRecord, AcquisitionSettingsUpdate, ConnectionTestResult,
+        AudiobookshelfIntegrationRecord, AudiobookshelfIntegrationUpdate,
         DownloadClientSettingsRecord, DownloadClientSettingsUpdate, ImportSettingsRecord,
         ImportSettingsUpdate, IntegrationSettingsRecord, IntegrationSettingsUpdate,
         MetadataSettingsRecord, MetadataSettingsUpdate, ProwlarrIntegrationRecord,
@@ -29,6 +32,8 @@ fn export_types() {
     RequestRecord::export_all_to("frontend/src/lib/types/").unwrap();
     RequestListRecord::export_all_to("frontend/src/lib/types/").unwrap();
     RequestDetailRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    ReleaseCandidate::export_all_to("frontend/src/lib/types/").unwrap();
+    ReviewQueueEntry::export_all_to("frontend/src/lib/types/").unwrap();
     RequestEventKind::export_all_to("frontend/src/lib/types/").unwrap();
     RequestEventRecord::export_all_to("frontend/src/lib/types/").unwrap();
     StorageSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
@@ -39,6 +44,8 @@ fn export_types() {
     QbittorrentSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
     ProwlarrIntegrationRecord::export_all_to("frontend/src/lib/types/").unwrap();
     ProwlarrIntegrationUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    AudiobookshelfIntegrationRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    AudiobookshelfIntegrationUpdate::export_all_to("frontend/src/lib/types/").unwrap();
     ImportSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
     ImportSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
     AcquisitionSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
@@ -51,4 +58,6 @@ fn export_types() {
     RuntimeSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
     SyncedIndexerRecord::export_all_to("frontend/src/lib/types/").unwrap();
     ConnectionTestResult::export_all_to("frontend/src/lib/types/").unwrap();
+    LibraryScanJobRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    LibraryScanResponse::export_all_to("frontend/src/lib/types/").unwrap();
 }

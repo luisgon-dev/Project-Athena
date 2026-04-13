@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use axum::{
     Router,
@@ -16,21 +16,27 @@ use crate::{
     http::handlers::{
         covers::openlibrary_cover,
         health::health,
+        library::{scan_status, trigger_scan},
         prowlarr::{
             delete_indexer, get_indexer, get_indexer_schema, get_indexers, get_system_status,
             post_indexer, test_indexer, update_indexer,
         },
-        requests::{create_request, requests_index, search_requests, show_request},
+        requests::{
+            approve_review_candidate, create_request, reject_review_candidate, requests_index,
+            retry_request_search, search_requests, show_request,
+        },
         settings::{
-            get_acquisition_settings, get_import_settings, get_prowlarr_settings,
-            get_qbittorrent_settings, get_runtime_settings, get_storage_settings,
-            list_synced_indexers, test_prowlarr_settings, test_qbittorrent_settings,
+            get_acquisition_settings, get_audiobookshelf_settings, get_import_settings,
+            get_prowlarr_settings, get_qbittorrent_settings, get_runtime_settings,
+            get_storage_settings, list_synced_indexers, test_audiobookshelf_settings,
+            test_prowlarr_settings, test_qbittorrent_settings,
             update_acquisition_settings, update_import_settings, update_prowlarr_settings,
-            update_qbittorrent_settings, update_runtime_settings, update_storage_settings,
+            update_audiobookshelf_settings, update_qbittorrent_settings,
+            update_runtime_settings, update_storage_settings,
         },
     },
     metadata::openlibrary::OpenLibraryClient,
-    workers::backfill::BackfillWorker,
+    workers::{backfill::BackfillWorker, download_worker::DownloadWorker, search_worker::SearchWorker},
 };
 
 #[derive(Clone)]
@@ -66,6 +72,10 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
     );
 
     BackfillWorker::spawn(pool.clone(), open_library.clone());
+    if config.enable_fulfillment_workers {
+        SearchWorker::spawn(pool.clone(), settings.clone(), Duration::from_secs(15));
+        DownloadWorker::spawn(pool.clone(), settings.clone(), Duration::from_secs(10));
+    }
 
     let state = AppState { pool, settings };
     let api_router = Router::new()
@@ -73,6 +83,15 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
         .route("/requests", get(requests_index).post(create_request))
         .route("/requests/search", get(search_requests))
         .route("/requests/{id}", get(show_request))
+        .route("/requests/{id}/retry-search", axum::routing::post(retry_request_search))
+        .route(
+            "/requests/{id}/review-queue/{candidate_id}/approve",
+            axum::routing::post(approve_review_candidate),
+        )
+        .route(
+            "/requests/{id}/review-queue/{candidate_id}/reject",
+            axum::routing::post(reject_review_candidate),
+        )
         .route("/covers/openlibrary/{cover_id}", get(openlibrary_cover))
         .route(
             "/settings/runtime",
@@ -106,7 +125,17 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
             "/settings/integrations/prowlarr/test",
             axum::routing::post(test_prowlarr_settings),
         )
+        .route(
+            "/settings/integrations/audiobookshelf",
+            get(get_audiobookshelf_settings).put(update_audiobookshelf_settings),
+        )
+        .route(
+            "/settings/integrations/audiobookshelf/test",
+            axum::routing::post(test_audiobookshelf_settings),
+        )
         .route("/settings/synced-indexers", get(list_synced_indexers))
+        .route("/library/scan", axum::routing::post(trigger_scan))
+        .route("/library/scan-status", get(scan_status))
         .route("/system/status", get(get_system_status))
         .route("/indexer", get(get_indexers).post(post_indexer))
         .route("/indexer/schema", get(get_indexer_schema))

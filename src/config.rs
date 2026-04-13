@@ -46,6 +46,7 @@ pub struct AppConfig {
     pub metadata_base_url: String,
     pub cover_base_url: String,
     pub qbittorrent: Option<QbittorrentConfig>,
+    pub enable_fulfillment_workers: bool,
 }
 
 impl AppConfig {
@@ -62,6 +63,7 @@ impl AppConfig {
             metadata_base_url: "https://openlibrary.org".into(),
             cover_base_url: "https://covers.openlibrary.org".into(),
             qbittorrent: None,
+            enable_fulfillment_workers: false,
         }
     }
 
@@ -90,6 +92,7 @@ impl AppConfig {
             cover_base_url: get("COVER_BASE_URL")
                 .unwrap_or_else(|| "https://covers.openlibrary.org".into()),
             qbittorrent: qbittorrent_from_env(&get),
+            enable_fulfillment_workers: true,
         };
 
         config.validate()?;
@@ -139,6 +142,11 @@ impl AppConfig {
 
     pub fn with_cover_base_url(mut self, value: impl Into<String>) -> Self {
         self.cover_base_url = value.into();
+        self
+    }
+
+    pub fn with_fulfillment_workers_enabled(mut self, value: bool) -> Self {
+        self.enable_fulfillment_workers = value;
         self
     }
 }

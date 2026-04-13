@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <title>Athena Fixture Indexer</title>
+    <description>Static Torznab fixture for acceptance runs.</description>
+    <item>
+      <title>The Hobbit - Acceptance Fixture</title>
+      <guid isPermaLink="false">fixture-the-hobbit-001</guid>
+      <link>magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&amp;dn=The+Hobbit+-+Acceptance+Fixture</link>
+      <pubDate>Mon, 13 Apr 2026 12:00:00 GMT</pubDate>
+      <size>104857600</size>
+      <torznab:attr name="size" value="104857600" />
+      <torznab:attr name="seeders" value="42" />
+      <torznab:attr name="peers" value="55" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+  </channel>
+</rss>

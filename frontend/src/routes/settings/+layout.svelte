@@ -1,5 +1,13 @@
 <script lang="ts">
-	import { Cable, Database, Download, LayoutList, Library, Rows3 } from 'lucide-svelte';
+	import {
+		Cable,
+		Database,
+		Download,
+		Headphones,
+		LayoutList,
+		Library,
+		Rows3
+	} from 'lucide-svelte';
 
 	let { children } = $props();
 
@@ -7,6 +15,7 @@
 		{ href: '/settings', label: 'Overview', icon: LayoutList },
 		{ href: '/settings/download-clients/qbittorrent', label: 'qBittorrent', icon: Download },
 		{ href: '/settings/integrations/prowlarr', label: 'Prowlarr', icon: Cable },
+		{ href: '/settings/integrations/audiobookshelf', label: 'Audiobookshelf', icon: Headphones },
 		{ href: '/settings/storage', label: 'Storage', icon: Database },
 		{ href: '/settings/import', label: 'Import', icon: Library },
 		{ href: '/settings/acquisition', label: 'Acquisition', icon: Rows3 },
@@ -20,7 +29,7 @@
 			<p class="eyebrow">Settings center</p>
 			<h2 class="mt-3 font-serif text-2xl text-stone-950">Operational controls</h2>
 			<p class="mt-2 text-sm leading-6 text-stone-600">
-				Download routing, storage, imports, and Prowlarr sync live here.
+				Download routing, storage, imports, search, and Audiobookshelf sync live here.
 			</p>
 		</div>
 		<nav class="grid gap-2">

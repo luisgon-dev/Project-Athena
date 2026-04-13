@@ -1,7 +1,11 @@
 import type { CreateRequestSelection } from '$lib/types/CreateRequestSelection';
 import type { AcquisitionSettingsRecord } from '$lib/types/AcquisitionSettingsRecord';
 import type { AcquisitionSettingsUpdate } from '$lib/types/AcquisitionSettingsUpdate';
+import type { AudiobookshelfIntegrationRecord } from '$lib/types/AudiobookshelfIntegrationRecord';
+import type { AudiobookshelfIntegrationUpdate } from '$lib/types/AudiobookshelfIntegrationUpdate';
 import type { ConnectionTestResult } from '$lib/types/ConnectionTestResult';
+import type { LibraryScanJobRecord } from '$lib/types/LibraryScanJobRecord';
+import type { LibraryScanResponse } from '$lib/types/LibraryScanResponse';
 import type { ImportSettingsRecord } from '$lib/types/ImportSettingsRecord';
 import type { ImportSettingsUpdate } from '$lib/types/ImportSettingsUpdate';
 import type { ProwlarrIntegrationRecord } from '$lib/types/ProwlarrIntegrationRecord';
@@ -84,6 +88,30 @@ export function createRequests(payload: CreateRequestSelection): Promise<Request
 
 export function getRequestDetail(requestId: string): Promise<RequestDetailRecord> {
 	return requestJson<RequestDetailRecord>(`/requests/${requestId}`);
+}
+
+export function retryRequestSearch(requestId: string): Promise<RequestDetailRecord> {
+	return requestJson<RequestDetailRecord>(`/requests/${requestId}/retry-search`, {
+		method: 'POST'
+	});
+}
+
+export function approveReviewCandidate(
+	requestId: string,
+	candidateId: bigint | number
+): Promise<RequestDetailRecord> {
+	return requestJson<RequestDetailRecord>(`/requests/${requestId}/review-queue/${candidateId}/approve`, {
+		method: 'POST'
+	});
+}
+
+export function rejectReviewCandidate(
+	requestId: string,
+	candidateId: bigint | number
+): Promise<RequestDetailRecord> {
+	return requestJson<RequestDetailRecord>(`/requests/${requestId}/review-queue/${candidateId}/reject`, {
+		method: 'POST'
+	});
 }
 
 export function getRuntimeSettings(): Promise<RuntimeSettingsRecord> {
@@ -171,6 +199,36 @@ export function testProwlarrSettings(
 	);
 }
 
+export function getAudiobookshelfSettings(): Promise<AudiobookshelfIntegrationRecord> {
+	return requestJson<AudiobookshelfIntegrationRecord>('/settings/integrations/audiobookshelf');
+}
+
+export function updateAudiobookshelfSettings(
+	payload: AudiobookshelfIntegrationUpdate
+): Promise<AudiobookshelfIntegrationRecord> {
+	return requestJson<AudiobookshelfIntegrationRecord>(
+		'/settings/integrations/audiobookshelf',
+		jsonRequest('audiobookshelf', 'PUT', payload)
+	);
+}
+
+export function testAudiobookshelfSettings(
+	payload: AudiobookshelfIntegrationUpdate
+): Promise<ConnectionTestResult> {
+	return requestJson<ConnectionTestResult>(
+		'/settings/integrations/audiobookshelf/test',
+		jsonRequest('audiobookshelf-test', 'POST', payload)
+	);
+}
+
 export function listSyncedIndexers(): Promise<SyncedIndexerRecord[]> {
 	return requestJson<SyncedIndexerRecord[]>('/settings/synced-indexers');
+}
+
+export function triggerLibraryScan(): Promise<LibraryScanResponse> {
+	return requestJson<LibraryScanResponse>('/library/scan', { method: 'POST' });
+}
+
+export function getLibraryScanStatus(): Promise<LibraryScanJobRecord | null> {
+	return requestJson<LibraryScanJobRecord | null>('/library/scan-status');
 }
