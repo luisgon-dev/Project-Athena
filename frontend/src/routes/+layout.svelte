@@ -1,7 +1,7 @@
 <script lang="ts">
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
-	import { Compass, LibraryBig, Radar } from 'lucide-svelte';
+	import { Compass, LibraryBig, Radar, SlidersHorizontal } from 'lucide-svelte';
 
 	let { children } = $props();
 </script>
@@ -48,6 +48,10 @@
 				<a class="nav-link" href="/requests/new">
 					<Compass class="h-4 w-4" />
 					<span>Metadata Wizard</span>
+				</a>
+				<a class="nav-link" href="/settings">
+					<SlidersHorizontal class="h-4 w-4" />
+					<span>Settings</span>
 				</a>
 			</nav>
 		</header>

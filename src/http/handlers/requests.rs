@@ -41,7 +41,11 @@ pub async fn search_requests(
     let author = search.author.unwrap_or_default();
     let has_searched = !(title.trim().is_empty() && author.trim().is_empty());
     let works = if has_searched {
-        state.open_library.search_works(&title, &author).await?
+        state
+            .open_library_client()
+            .await?
+            .search_works(&title, &author)
+            .await?
     } else {
         WorkSearch { works: Vec::new() }
     };
@@ -62,8 +66,8 @@ pub async fn create_request(
     let selected_work_id = normalize_optional_text(payload.selected_work_id)
         .ok_or_else(|| AppError::BadRequest("missing selected_work_id".to_string()))?;
 
-    let selected_work = state
-        .open_library
+    let open_library = state.open_library_client().await?;
+    let selected_work = open_library
         .resolve_work_by_id(&selected_work_id)
         .await?
         .ok_or_else(|| AppError::BadRequest("selected work id not found".to_string()))?

@@ -19,8 +19,11 @@ pub async fn openlibrary_cover(
     Query(query): Query<CoverQuery>,
 ) -> Result<Response<Body>, StatusCode> {
     let size = CoverSize::from_query_value(query.size.as_deref());
-    let Some(image) = state
-        .open_library
+    let open_library = state.open_library_client().await.map_err(|error| {
+        warn!(cover_id, size = %size.as_str(), error = %error, "cover proxy settings load failed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let Some(image) = open_library
         .fetch_cover(cover_id, size)
         .await
         .map_err(|error| {

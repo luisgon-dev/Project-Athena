@@ -1,7 +1,7 @@
 import { page } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
-import DashboardPage from './+page.svelte';
+import DashboardPage from '../+page.svelte';
 
 describe('dashboard page', () => {
 	afterEach(() => {

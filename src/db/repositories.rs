@@ -1,15 +1,24 @@
-use anyhow::Result;
-use serde_json::json;
+use anyhow::{Context, Result};
+use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
+use crate::config::AppConfig;
 use crate::domain::{
     events::{RequestEventKind, RequestEventRecord},
     requests::{CreateRequest, RequestListRecord, RequestRecord},
     search::{ReleaseCandidate, ReviewQueueEntry, ScoredCandidate},
+    settings::{
+        PersistedRuntimeSettings, RuntimeSettingsRecord, RuntimeSettingsUpdate, SyncedIndexerRecord,
+    },
 };
 
 pub struct SqliteRequestRepository {
+    pool: SqlitePool,
+}
+
+#[derive(Clone)]
+pub struct SqliteSettingsRepository {
     pool: SqlitePool,
 }
 
@@ -470,6 +479,219 @@ impl SqliteRequestRepository {
     }
 }
 
+impl SqliteSettingsRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn ensure_seeded(&self, config: &AppConfig) -> Result<PersistedRuntimeSettings> {
+        if let Some(settings) = self.get_persisted_runtime_settings().await? {
+            return Ok(settings);
+        }
+
+        let settings = PersistedRuntimeSettings::from_config(config);
+        self.write_runtime_settings(&settings).await?;
+        Ok(settings)
+    }
+
+    pub async fn get_runtime_settings(&self) -> Result<RuntimeSettingsRecord> {
+        let settings = self
+            .get_persisted_runtime_settings()
+            .await?
+            .context("runtime settings row missing")?;
+        Ok(settings.to_record())
+    }
+
+    pub async fn get_persisted_runtime_settings(&self) -> Result<Option<PersistedRuntimeSettings>> {
+        let row = sqlx::query(
+            "SELECT settings_json
+             FROM runtime_settings
+             WHERE singleton_key = 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            serde_json::from_str::<PersistedRuntimeSettings>(&row.get::<String, _>("settings_json"))
+                .map_err(anyhow::Error::from)
+        })
+        .transpose()
+    }
+
+    pub async fn update_runtime_settings(
+        &self,
+        update: RuntimeSettingsUpdate,
+    ) -> Result<RuntimeSettingsRecord> {
+        let mut settings = self
+            .get_persisted_runtime_settings()
+            .await?
+            .context("runtime settings row missing")?;
+        settings.apply_update(update);
+        settings.validate()?;
+        self.write_runtime_settings(&settings).await?;
+        Ok(settings.to_record())
+    }
+
+    pub async fn list_synced_indexers(&self) -> Result<Vec<SyncedIndexerRecord>> {
+        let rows = sqlx::query(
+            "SELECT
+                id,
+                prowlarr_indexer_id,
+                name,
+                enabled,
+                implementation,
+                protocol,
+                base_url,
+                categories_json,
+                last_synced_at
+             FROM synced_indexers
+             ORDER BY name ASC, id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(row_to_synced_indexer_record).collect()
+    }
+
+    pub async fn get_synced_indexer_resource(&self, id: i64) -> Result<Option<Value>> {
+        let row = sqlx::query(
+            "SELECT id, raw_payload_json, api_key
+             FROM synced_indexers
+             WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(row_to_indexer_resource).transpose()
+    }
+
+    pub async fn list_synced_indexer_resources(&self) -> Result<Vec<Value>> {
+        let rows = sqlx::query(
+            "SELECT id, raw_payload_json, api_key
+             FROM synced_indexers
+             ORDER BY id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(row_to_indexer_resource).collect()
+    }
+
+    pub async fn create_synced_indexer_resource(&self, resource: &Value) -> Result<Value> {
+        let indexer = ParsedIndexerPayload::parse(resource)?;
+
+        let row = sqlx::query(
+            "INSERT INTO synced_indexers (
+                prowlarr_indexer_id,
+                name,
+                enabled,
+                implementation,
+                implementation_name,
+                config_contract,
+                protocol,
+                priority,
+                base_url,
+                api_path,
+                categories_json,
+                api_key,
+                raw_payload_json,
+                updated_at,
+                last_synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id, raw_payload_json, api_key",
+        )
+        .bind(indexer.prowlarr_indexer_id)
+        .bind(&indexer.name)
+        .bind(indexer.enabled)
+        .bind(&indexer.implementation)
+        .bind(&indexer.implementation_name)
+        .bind(&indexer.config_contract)
+        .bind(indexer.protocol.as_deref())
+        .bind(indexer.priority)
+        .bind(indexer.base_url.as_deref())
+        .bind(indexer.api_path.as_deref())
+        .bind(serde_json::to_string(&indexer.categories)?)
+        .bind(indexer.api_key.as_deref())
+        .bind(indexer.raw_payload.to_string())
+        .fetch_one(&self.pool)
+        .await?;
+
+        row_to_indexer_resource(row)
+    }
+
+    pub async fn update_synced_indexer_resource(
+        &self,
+        id: i64,
+        resource: &Value,
+    ) -> Result<Option<Value>> {
+        let indexer = ParsedIndexerPayload::parse(resource)?;
+
+        let row = sqlx::query(
+            "UPDATE synced_indexers
+             SET prowlarr_indexer_id = ?,
+                 name = ?,
+                 enabled = ?,
+                 implementation = ?,
+                 implementation_name = ?,
+                 config_contract = ?,
+                 protocol = ?,
+                 priority = ?,
+                 base_url = ?,
+                 api_path = ?,
+                 categories_json = ?,
+                 api_key = ?,
+                 raw_payload_json = ?,
+                 updated_at = CURRENT_TIMESTAMP,
+                 last_synced_at = CURRENT_TIMESTAMP
+             WHERE id = ?
+             RETURNING id, raw_payload_json, api_key",
+        )
+        .bind(indexer.prowlarr_indexer_id)
+        .bind(&indexer.name)
+        .bind(indexer.enabled)
+        .bind(&indexer.implementation)
+        .bind(&indexer.implementation_name)
+        .bind(&indexer.config_contract)
+        .bind(indexer.protocol.as_deref())
+        .bind(indexer.priority)
+        .bind(indexer.base_url.as_deref())
+        .bind(indexer.api_path.as_deref())
+        .bind(serde_json::to_string(&indexer.categories)?)
+        .bind(indexer.api_key.as_deref())
+        .bind(indexer.raw_payload.to_string())
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(row_to_indexer_resource).transpose()
+    }
+
+    pub async fn delete_synced_indexer(&self, id: i64) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM synced_indexers WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn write_runtime_settings(&self, settings: &PersistedRuntimeSettings) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO runtime_settings (singleton_key, settings_json)
+             VALUES (1, ?)
+             ON CONFLICT(singleton_key) DO UPDATE SET
+                 settings_json = excluded.settings_json,
+                 updated_at = CURRENT_TIMESTAMP",
+        )
+        .bind(serde_json::to_string(settings)?)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+}
+
 fn manifestation_from_payload(
     payload: &serde_json::Value,
 ) -> crate::domain::requests::ManifestationPreference {
@@ -492,4 +714,166 @@ fn manifestation_from_payload(
             .and_then(|value| value.as_bool())
             .unwrap_or(false),
     }
+}
+
+fn row_to_synced_indexer_record(row: sqlx::sqlite::SqliteRow) -> Result<SyncedIndexerRecord> {
+    Ok(SyncedIndexerRecord {
+        id: row.get::<i64, _>("id"),
+        prowlarr_indexer_id: row.get::<Option<i64>, _>("prowlarr_indexer_id"),
+        name: row.get::<String, _>("name"),
+        enabled: row.get::<bool, _>("enabled"),
+        implementation: row.get::<String, _>("implementation"),
+        protocol: row.get::<Option<String>, _>("protocol"),
+        base_url: row.get::<Option<String>, _>("base_url"),
+        categories: serde_json::from_str(row.get::<String, _>("categories_json").as_str())?,
+        last_synced_at: row.get::<String, _>("last_synced_at"),
+    })
+}
+
+fn row_to_indexer_resource(row: sqlx::sqlite::SqliteRow) -> Result<Value> {
+    let id = row.get::<i64, _>("id");
+    let api_key = row.get::<Option<String>, _>("api_key");
+    let mut payload: Value = serde_json::from_str(&row.get::<String, _>("raw_payload_json"))?;
+
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("id".to_string(), json!(id));
+    }
+
+    mask_indexer_secret_fields(&mut payload, api_key.as_deref());
+    Ok(payload)
+}
+
+fn mask_indexer_secret_fields(payload: &mut Value, api_key: Option<&str>) {
+    let Some(fields) = payload.get_mut("fields").and_then(Value::as_array_mut) else {
+        return;
+    };
+
+    for field in fields {
+        if field.get("name").and_then(Value::as_str) == Some("apiKey")
+            && let Some(object) = field.as_object_mut()
+        {
+            let value = if api_key.unwrap_or_default().is_empty() {
+                Value::Null
+            } else {
+                Value::String("********".to_string())
+            };
+            object.insert("value".to_string(), value);
+        }
+    }
+}
+
+struct ParsedIndexerPayload {
+    prowlarr_indexer_id: Option<i64>,
+    name: String,
+    enabled: bool,
+    implementation: String,
+    implementation_name: String,
+    config_contract: String,
+    protocol: Option<String>,
+    priority: i64,
+    base_url: Option<String>,
+    api_path: Option<String>,
+    api_key: Option<String>,
+    categories: Vec<i64>,
+    raw_payload: Value,
+}
+
+impl ParsedIndexerPayload {
+    fn parse(payload: &Value) -> Result<Self> {
+        let object = payload
+            .as_object()
+            .context("indexer payload must be a JSON object")?;
+        let fields = object
+            .get("fields")
+            .and_then(Value::as_array)
+            .context("indexer payload must include fields")?;
+
+        let base_url = field_as_string(fields, "baseUrl");
+        let api_path = field_as_string(fields, "apiPath");
+        let api_key = field_as_string(fields, "apiKey");
+        let categories = field_as_i64_vec(fields, "categories");
+        let implementation = object
+            .get("implementation")
+            .and_then(Value::as_str)
+            .unwrap_or("Torznab")
+            .to_string();
+        let implementation_name = object
+            .get("implementationName")
+            .and_then(Value::as_str)
+            .unwrap_or(implementation.as_str())
+            .to_string();
+        let config_contract = object
+            .get("configContract")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| match implementation.as_str() {
+                "Newznab" => "NewznabSettings",
+                _ => "TorznabSettings",
+            })
+            .to_string();
+
+        Ok(Self {
+            prowlarr_indexer_id: base_url
+                .as_deref()
+                .and_then(parse_prowlarr_indexer_id_from_base_url),
+            name: object
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("Unnamed Indexer")
+                .to_string(),
+            enabled: object
+                .get("enableRss")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || object
+                    .get("enableAutomaticSearch")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                || object
+                    .get("enableInteractiveSearch")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            implementation,
+            implementation_name,
+            config_contract,
+            protocol: object
+                .get("protocol")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            priority: object.get("priority").and_then(Value::as_i64).unwrap_or(25),
+            base_url,
+            api_path,
+            api_key,
+            categories,
+            raw_payload: payload.clone(),
+        })
+    }
+}
+
+fn field_as_string(fields: &[Value], name: &str) -> Option<String> {
+    fields
+        .iter()
+        .find(|field| field.get("name").and_then(Value::as_str) == Some(name))
+        .and_then(|field| field.get("value"))
+        .and_then(|value| match value {
+            Value::Null => None,
+            Value::String(text) => Some(text.clone()),
+            other => Some(other.to_string()),
+        })
+}
+
+fn field_as_i64_vec(fields: &[Value], name: &str) -> Vec<i64> {
+    fields
+        .iter()
+        .find(|field| field.get("name").and_then(Value::as_str) == Some(name))
+        .and_then(|field| field.get("value"))
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_i64).collect())
+        .unwrap_or_default()
+}
+
+fn parse_prowlarr_indexer_id_from_base_url(base_url: &str) -> Option<i64> {
+    let url = reqwest::Url::parse(base_url).ok()?;
+    url.path_segments()?
+        .filter(|segment| !segment.is_empty())
+        .find_map(|segment| segment.parse::<i64>().ok())
 }

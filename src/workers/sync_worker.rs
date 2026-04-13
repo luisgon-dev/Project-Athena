@@ -2,10 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-use crate::{
-    db::repositories::SqliteRequestRepository,
-    sync::calibre::CalibreHook,
-};
+use crate::{db::repositories::SqliteRequestRepository, sync::calibre::CalibreHook};
 
 pub struct SyncWorker;
 

@@ -153,7 +153,9 @@ async fn get_requests_searches_open_library_and_returns_enriched_matches_as_json
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("{API_PREFIX}/requests/search?title=The+Hobbit&author=Tolkien"))
+                .uri(format!(
+                    "{API_PREFIX}/requests/search?title=The+Hobbit&author=Tolkien"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -308,8 +310,14 @@ async fn post_requests_creates_requests_and_detail_includes_event_history() {
         assert_eq!(detail.status(), StatusCode::OK);
         let detail_body = json_body(detail).await;
         assert_eq!(detail_body["request"]["external_work_id"], "OL27448W");
-        assert_eq!(detail_body["request"]["title"], "The Hobbit: There and Back Again");
-        assert_eq!(detail_body["request"]["manifestation"]["preferred_narrator"], "Andy Serkis");
+        assert_eq!(
+            detail_body["request"]["title"],
+            "The Hobbit: There and Back Again"
+        );
+        assert_eq!(
+            detail_body["request"]["manifestation"]["preferred_narrator"],
+            "Andy Serkis"
+        );
         assert_eq!(detail_body["events"].as_array().unwrap().len(), 1);
         assert_eq!(detail_body["events"][0]["kind"], "Created");
     }
@@ -399,7 +407,10 @@ async fn post_requests_rejects_invalid_json_payloads() {
         .unwrap();
 
     assert_eq!(missing_selection.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(json_body(missing_selection).await["error"], "missing selected_work_id");
+    assert_eq!(
+        json_body(missing_selection).await["error"],
+        "missing selected_work_id"
+    );
 
     let missing_media_types = app
         .oneshot(json_request(
@@ -420,7 +431,10 @@ async fn post_requests_rejects_invalid_json_payloads() {
         .unwrap();
 
     assert_eq!(missing_media_types.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(json_body(missing_media_types).await["error"], "no media types selected");
+    assert_eq!(
+        json_body(missing_media_types).await["error"],
+        "no media types selected"
+    );
 }
 
 #[tokio::test]
@@ -454,7 +468,10 @@ async fn post_requests_rejects_forged_selected_work_not_backed_by_metadata() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(json_body(response).await["error"], "selected work id not found");
+    assert_eq!(
+        json_body(response).await["error"],
+        "selected work id not found"
+    );
 }
 
 #[tokio::test]
@@ -494,7 +511,10 @@ async fn request_survives_app_rebuild_with_same_config_using_api_routes() {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        json_body(response).await[0]["id"].as_str().unwrap().to_string()
+        json_body(response).await[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
     };
 
     let rebuilt_app = build_app(config).await.unwrap();
@@ -510,7 +530,10 @@ async fn request_survives_app_rebuild_with_same_config_using_api_routes() {
         .unwrap();
 
     assert_eq!(detail.status(), StatusCode::OK);
-    assert_eq!(json_body(detail).await["request"]["external_work_id"], "OL27448W");
+    assert_eq!(
+        json_body(detail).await["request"]["external_work_id"],
+        "OL27448W"
+    );
 }
 
 #[tokio::test]

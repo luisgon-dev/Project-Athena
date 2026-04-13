@@ -1,10 +1,19 @@
 use book_router::domain::{
-    catalog::{WorkRecord, ResolvedWork, WorkSearch},
+    catalog::{ResolvedWork, WorkRecord, WorkSearch},
+    events::{RequestEventKind, RequestEventRecord},
     requests::{
         CreateRequest, CreateRequestSelection, ManifestationPreference, MediaType,
         RequestDetailRecord, RequestListRecord, RequestRecord,
     },
-    events::{RequestEventKind, RequestEventRecord},
+    settings::{
+        AcquisitionSettingsRecord, AcquisitionSettingsUpdate, ConnectionTestResult,
+        DownloadClientSettingsRecord, DownloadClientSettingsUpdate, ImportSettingsRecord,
+        ImportSettingsUpdate, IntegrationSettingsRecord, IntegrationSettingsUpdate,
+        MetadataSettingsRecord, MetadataSettingsUpdate, ProwlarrIntegrationRecord,
+        ProwlarrIntegrationUpdate, QbittorrentSettingsRecord, QbittorrentSettingsUpdate,
+        RuntimeSettingsRecord, RuntimeSettingsUpdate, StorageSettingsRecord, StorageSettingsUpdate,
+        SyncedIndexerRecord,
+    },
 };
 use ts_rs::TS;
 
@@ -22,4 +31,24 @@ fn export_types() {
     RequestDetailRecord::export_all_to("frontend/src/lib/types/").unwrap();
     RequestEventKind::export_all_to("frontend/src/lib/types/").unwrap();
     RequestEventRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    StorageSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    StorageSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    MetadataSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    MetadataSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    QbittorrentSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    QbittorrentSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    ProwlarrIntegrationRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    ProwlarrIntegrationUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    ImportSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    ImportSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    AcquisitionSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    AcquisitionSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    DownloadClientSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    DownloadClientSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    IntegrationSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    IntegrationSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    RuntimeSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    RuntimeSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    SyncedIndexerRecord::export_all_to("frontend/src/lib/types/").unwrap();
+    ConnectionTestResult::export_all_to("frontend/src/lib/types/").unwrap();
 }
