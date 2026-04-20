@@ -29,14 +29,15 @@ use crate::{
             get_acquisition_settings, get_audiobookshelf_settings, get_import_settings,
             get_prowlarr_settings, get_qbittorrent_settings, get_runtime_settings,
             get_storage_settings, list_synced_indexers, test_audiobookshelf_settings,
-            test_prowlarr_settings, test_qbittorrent_settings,
-            update_acquisition_settings, update_import_settings, update_prowlarr_settings,
-            update_audiobookshelf_settings, update_qbittorrent_settings,
-            update_runtime_settings, update_storage_settings,
+            test_prowlarr_settings, test_qbittorrent_settings, update_acquisition_settings,
+            update_audiobookshelf_settings, update_import_settings, update_prowlarr_settings,
+            update_qbittorrent_settings, update_runtime_settings, update_storage_settings,
         },
     },
     metadata::openlibrary::OpenLibraryClient,
-    workers::{backfill::BackfillWorker, download_worker::DownloadWorker, search_worker::SearchWorker},
+    workers::{
+        backfill::BackfillWorker, download_worker::DownloadWorker, search_worker::SearchWorker,
+    },
 };
 
 #[derive(Clone)]
@@ -83,7 +84,10 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
         .route("/requests", get(requests_index).post(create_request))
         .route("/requests/search", get(search_requests))
         .route("/requests/{id}", get(show_request))
-        .route("/requests/{id}/retry-search", axum::routing::post(retry_request_search))
+        .route(
+            "/requests/{id}/retry-search",
+            axum::routing::post(retry_request_search),
+        )
         .route(
             "/requests/{id}/review-queue/{candidate_id}/approve",
             axum::routing::post(approve_review_candidate),

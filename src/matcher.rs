@@ -20,10 +20,12 @@ pub fn score_candidate(request: &RequestRecord, candidate: &ReleaseCandidate) ->
         explanation.push("author matched".to_string());
     }
 
-    if matches!(request.media_type, crate::domain::requests::MediaType::Ebook)
-        && (candidate_title.contains("epub")
-            || candidate_title.contains("pdf")
-            || candidate_title.contains("azw3"))
+    if matches!(
+        request.media_type,
+        crate::domain::requests::MediaType::Ebook
+    ) && (candidate_title.contains("epub")
+        || candidate_title.contains("pdf")
+        || candidate_title.contains("azw3"))
     {
         score += 0.20;
         explanation.push("ebook format matched".to_string());

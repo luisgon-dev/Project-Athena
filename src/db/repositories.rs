@@ -257,10 +257,9 @@ impl SqliteRequestRepository {
         let mut requests = Vec::with_capacity(rows.len());
         for row in rows {
             let request_id = row.get::<String, _>("id");
-            let request = self
-                .find_by_id(&request_id)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("request {request_id} disappeared during search scan"))?;
+            let request = self.find_by_id(&request_id).await?.ok_or_else(|| {
+                anyhow::anyhow!("request {request_id} disappeared during search scan")
+            })?;
             requests.push(request);
         }
 
@@ -362,8 +361,7 @@ impl SqliteRequestRepository {
         Ok(rows
             .into_iter()
             .map(|row| row.get::<String, _>("candidate_external_id"))
-            .collect()
-        )
+            .collect())
     }
 
     pub async fn enqueue_review_candidate(

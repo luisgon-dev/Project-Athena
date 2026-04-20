@@ -54,7 +54,9 @@ async fn request_detail_includes_review_queue_and_reject_moves_to_no_match() {
             protocol: "torrent".into(),
             size_bytes: 1234,
             indexer: "Books".into(),
-            download_url: Some("magnet:?xt=urn:btih:cccccccccccccccccccccccccccccccccccccccc".into()),
+            download_url: Some(
+                "magnet:?xt=urn:btih:cccccccccccccccccccccccccccccccccccccccc".into(),
+            ),
         },
         &ScoredCandidate {
             score: 0.75,
@@ -164,7 +166,9 @@ async fn approving_review_candidate_dispatches_to_qbittorrent_and_clears_queue()
             protocol: "torrent".into(),
             size_bytes: 1234,
             indexer: "Books".into(),
-            download_url: Some("magnet:?xt=urn:btih:dddddddddddddddddddddddddddddddddddddddd".into()),
+            download_url: Some(
+                "magnet:?xt=urn:btih:dddddddddddddddddddddddddddddddddddddddd".into(),
+            ),
         },
         &ScoredCandidate {
             score: 0.75,

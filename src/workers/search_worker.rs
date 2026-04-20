@@ -19,11 +19,7 @@ use crate::{
 pub struct SearchWorker;
 
 impl SearchWorker {
-    pub fn spawn(
-        pool: sqlx::SqlitePool,
-        settings: SqliteSettingsRepository,
-        interval: Duration,
-    ) {
+    pub fn spawn(pool: sqlx::SqlitePool, settings: SqliteSettingsRepository, interval: Duration) {
         tokio::spawn(async move {
             loop {
                 if let Err(error) = Self::run_once(pool.clone(), settings.clone()).await {
@@ -139,7 +135,8 @@ impl SearchWorker {
         }
 
         for (candidate, scored) in qualified.iter().take(10) {
-            repo.enqueue_review_candidate(&request.id, candidate, scored).await?;
+            repo.enqueue_review_candidate(&request.id, candidate, scored)
+                .await?;
         }
         repo.mark_review_queued(&request.id, qualified.len().min(10), top_score)
             .await?;
@@ -187,7 +184,9 @@ impl SearchWorker {
                     }
                 }
             }
-            Err(error) => warn!(error = %error, request_id = %request.id, "failed to load synced indexers"),
+            Err(error) => {
+                warn!(error = %error, request_id = %request.id, "failed to load synced indexers")
+            }
         }
 
         dedupe_candidates(results)

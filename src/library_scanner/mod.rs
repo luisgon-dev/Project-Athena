@@ -4,11 +4,7 @@ use anyhow::Result;
 
 use crate::{
     db::repositories::SqliteRequestRepository,
-    domain::{
-        imports::ImportMediaType,
-        library::ScannedItem,
-        requests::MediaType,
-    },
+    domain::{imports::ImportMediaType, library::ScannedItem, requests::MediaType},
     importer::classify::classify_payload,
 };
 
@@ -64,7 +60,8 @@ impl LibraryScanner {
                     continue;
                 }
 
-                let file_strings: Vec<String> = files.iter().map(|p| p.display().to_string()).collect();
+                let file_strings: Vec<String> =
+                    files.iter().map(|p| p.display().to_string()).collect();
                 let classification = classify_payload(&file_strings);
 
                 let expected_media = match media_type {
@@ -72,7 +69,9 @@ impl LibraryScanner {
                     MediaType::Audiobook => ImportMediaType::Audiobook,
                 };
 
-                if classification.media_type != expected_media && classification.media_type != ImportMediaType::Mixed {
+                if classification.media_type != expected_media
+                    && classification.media_type != ImportMediaType::Mixed
+                {
                     continue;
                 }
 
@@ -152,14 +151,28 @@ mod tests {
         let audiobooks = tmp.path().join("audiobooks");
 
         std::fs::create_dir_all(ebooks.join("Isaac Asimov").join("Foundation")).unwrap();
-        std::fs::write(ebooks.join("Isaac Asimov").join("Foundation").join("Foundation.epub"), "")
-            .unwrap();
+        std::fs::write(
+            ebooks
+                .join("Isaac Asimov")
+                .join("Foundation")
+                .join("Foundation.epub"),
+            "",
+        )
+        .unwrap();
 
         std::fs::create_dir_all(audiobooks.join("Frank Herbert").join("Dune")).unwrap();
-        std::fs::write(audiobooks.join("Frank Herbert").join("Dune").join("part1.m4b"), "")
-            .unwrap();
+        std::fs::write(
+            audiobooks
+                .join("Frank Herbert")
+                .join("Dune")
+                .join("part1.m4b"),
+            "",
+        )
+        .unwrap();
 
-        let counts = LibraryScanner::scan(&ebooks, &audiobooks, &repo).await.unwrap();
+        let counts = LibraryScanner::scan(&ebooks, &audiobooks, &repo)
+            .await
+            .unwrap();
 
         assert_eq!(counts.ebooks_found, 1);
         assert_eq!(counts.audiobooks_found, 1);
@@ -173,15 +186,22 @@ mod tests {
         let ebooks = tmp.path().join("ebooks");
 
         std::fs::create_dir_all(ebooks.join("Author One").join("Book One")).unwrap();
-        std::fs::write(ebooks.join("Author One").join("Book One").join("book.epub"), "")
-            .unwrap();
+        std::fs::write(
+            ebooks.join("Author One").join("Book One").join("book.epub"),
+            "",
+        )
+        .unwrap();
 
         // First scan should succeed
-        let counts1 = LibraryScanner::scan(&ebooks, &PathBuf::from("/nonexistent"), &repo).await.unwrap();
+        let counts1 = LibraryScanner::scan(&ebooks, &PathBuf::from("/nonexistent"), &repo)
+            .await
+            .unwrap();
         assert_eq!(counts1.ebooks_found, 1);
 
         // Second scan should skip as duplicate
-        let counts2 = LibraryScanner::scan(&ebooks, &PathBuf::from("/nonexistent"), &repo).await.unwrap();
+        let counts2 = LibraryScanner::scan(&ebooks, &PathBuf::from("/nonexistent"), &repo)
+            .await
+            .unwrap();
         assert_eq!(counts2.ebooks_found, 0);
         assert_eq!(counts2.duplicates_skipped, 1);
     }

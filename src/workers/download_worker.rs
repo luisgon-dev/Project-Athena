@@ -18,11 +18,7 @@ use crate::{
 pub struct DownloadWorker;
 
 impl DownloadWorker {
-    pub fn spawn(
-        pool: sqlx::SqlitePool,
-        settings: SqliteSettingsRepository,
-        interval: Duration,
-    ) {
+    pub fn spawn(pool: sqlx::SqlitePool, settings: SqliteSettingsRepository, interval: Duration) {
         tokio::spawn(async move {
             loop {
                 if let Err(error) = Self::poll_once(pool.clone(), settings.clone()).await {

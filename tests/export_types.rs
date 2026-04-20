@@ -8,14 +8,13 @@ use book_router::domain::{
     },
     search::{ReleaseCandidate, ReviewQueueEntry},
     settings::{
-        AcquisitionSettingsRecord, AcquisitionSettingsUpdate, ConnectionTestResult,
-        AudiobookshelfIntegrationRecord, AudiobookshelfIntegrationUpdate,
-        DownloadClientSettingsRecord, DownloadClientSettingsUpdate, ImportSettingsRecord,
-        ImportSettingsUpdate, IntegrationSettingsRecord, IntegrationSettingsUpdate,
-        MetadataSettingsRecord, MetadataSettingsUpdate, ProwlarrIntegrationRecord,
-        ProwlarrIntegrationUpdate, QbittorrentSettingsRecord, QbittorrentSettingsUpdate,
-        RuntimeSettingsRecord, RuntimeSettingsUpdate, StorageSettingsRecord, StorageSettingsUpdate,
-        SyncedIndexerRecord,
+        AcquisitionSettingsRecord, AcquisitionSettingsUpdate, AudiobookshelfIntegrationRecord,
+        AudiobookshelfIntegrationUpdate, ConnectionTestResult, DownloadClientSettingsRecord,
+        DownloadClientSettingsUpdate, ImportSettingsRecord, ImportSettingsUpdate,
+        IntegrationSettingsRecord, IntegrationSettingsUpdate, MetadataSettingsRecord,
+        MetadataSettingsUpdate, ProwlarrIntegrationRecord, ProwlarrIntegrationUpdate,
+        QbittorrentSettingsRecord, QbittorrentSettingsUpdate, RuntimeSettingsRecord,
+        RuntimeSettingsUpdate, StorageSettingsRecord, StorageSettingsUpdate, SyncedIndexerRecord,
     },
 };
 use ts_rs::TS;

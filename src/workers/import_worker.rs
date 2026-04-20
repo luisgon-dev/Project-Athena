@@ -75,7 +75,9 @@ impl ImportWorker {
         }
 
         let source_paths = files.iter().map(PathBuf::from).collect::<Vec<_>>();
-        let destination_dir = audiobooks_root.join(sanitize_segment(&request.author)).join(sanitize_segment(&request.title));
+        let destination_dir = audiobooks_root
+            .join(sanitize_segment(&request.author))
+            .join(sanitize_segment(&request.title));
         let common_root = common_parent_dir(&source_paths)
             .context("audiobook payload did not have a common source root")?;
 
@@ -96,7 +98,8 @@ impl ImportWorker {
         }
 
         repo.complete_download(request_id, files).await?;
-        repo.mark_import_succeeded(request_id, &destination_dir).await?;
+        repo.mark_import_succeeded(request_id, &destination_dir)
+            .await?;
 
         Ok(destination_dir)
     }
@@ -122,10 +125,7 @@ fn common_parent_dir(paths: &[PathBuf]) -> Option<PathBuf> {
     let first_parent = paths.first()?.parent()?.to_path_buf();
     let mut common = first_parent;
 
-    while !paths
-        .iter()
-        .all(|path| path.starts_with(&common))
-    {
+    while !paths.iter().all(|path| path.starts_with(&common)) {
         common = common.parent()?.to_path_buf();
     }
 
@@ -145,7 +145,12 @@ fn sanitize_segment(value: &str) -> String {
     value
         .chars()
         .map(|character| {
-            if character.is_control() || matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+            if character.is_control()
+                || matches!(
+                    character,
+                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+                )
+            {
                 ' '
             } else {
                 character

@@ -92,7 +92,7 @@ impl AppConfig {
             cover_base_url: get("COVER_BASE_URL")
                 .unwrap_or_else(|| "https://covers.openlibrary.org".into()),
             qbittorrent: qbittorrent_from_env(&get),
-            enable_fulfillment_workers: true,
+            enable_fulfillment_workers: bool_from_env(get("ENABLE_FULFILLMENT_WORKERS"), true)?,
         };
 
         config.validate()?;
@@ -151,6 +151,18 @@ impl AppConfig {
     }
 }
 
+fn bool_from_env(value: Option<String>, default: bool) -> anyhow::Result<bool> {
+    let Some(value) = value else {
+        return Ok(default);
+    };
+
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        other => anyhow::bail!("invalid boolean value: {other}"),
+    }
+}
+
 fn qbittorrent_from_env<F>(get: &F) -> Option<QbittorrentConfig>
 where
     F: Fn(&str) -> Option<String>,
@@ -181,6 +193,7 @@ mod tests {
             "DATABASE_PATH" => Some("/var/lib/book-router/book-router.sqlite".into()),
             "METADATA_BASE_URL" => Some("https://metadata.example.test".into()),
             "COVER_BASE_URL" => Some("https://covers.example.test".into()),
+            "ENABLE_FULFILLMENT_WORKERS" => Some("false".into()),
             _ => None,
         })
         .unwrap();
@@ -190,10 +203,22 @@ mod tests {
         assert_eq!(config.audiobooks_root, PathBuf::from("/var/lib/audiobooks"));
         assert_eq!(config.metadata_base_url, "https://metadata.example.test");
         assert_eq!(config.cover_base_url, "https://covers.example.test");
+        assert!(!config.enable_fulfillment_workers);
         assert!(matches!(
             config.database,
             DatabaseTarget::File(ref path)
                 if path == Path::new("/var/lib/book-router/book-router.sqlite")
         ));
+    }
+
+    #[test]
+    fn from_env_with_rejects_invalid_worker_flag() {
+        let error = AppConfig::from_env_with(|key| match key {
+            "ENABLE_FULFILLMENT_WORKERS" => Some("maybe".into()),
+            _ => None,
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("invalid boolean value"));
     }
 }

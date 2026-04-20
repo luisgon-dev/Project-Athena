@@ -21,7 +21,10 @@ async fn search_worker_auto_acquires_high_confidence_candidates() {
     let pool = connect_sqlite(&DatabaseTarget::memory()).await.unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     let settings = SqliteSettingsRepository::new(pool.clone());
-    settings.ensure_seeded(&book_router::config::AppConfig::for_tests()).await.unwrap();
+    settings
+        .ensure_seeded(&book_router::config::AppConfig::for_tests())
+        .await
+        .unwrap();
 
     let qb_server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -113,7 +116,10 @@ async fn search_worker_queues_review_candidates_below_auto_threshold() {
     let pool = connect_sqlite(&DatabaseTarget::memory()).await.unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     let settings = SqliteSettingsRepository::new(pool.clone());
-    settings.ensure_seeded(&book_router::config::AppConfig::for_tests()).await.unwrap();
+    settings
+        .ensure_seeded(&book_router::config::AppConfig::for_tests())
+        .await
+        .unwrap();
 
     let prowlarr_server = MockServer::start().await;
     Mock::given(method("GET"))

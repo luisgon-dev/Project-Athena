@@ -15,13 +15,21 @@ async fn library_scan_triggers_and_returns_status() {
     let audiobooks = tmp.path().join("audiobooks");
 
     std::fs::create_dir_all(ebooks.join("Arthur C. Clarke").join("2001")).unwrap();
-    std::fs::write(ebooks.join("Arthur C. Clarke").join("2001").join("2001.epub"), "")
-        .unwrap();
-
-    std::fs::create_dir_all(audiobooks.join("Philip K. Dick").join("Do Androids Dream"))
-        .unwrap();
     std::fs::write(
-        audiobooks.join("Philip K. Dick").join("Do Androids Dream").join("part1.m4b"),
+        ebooks
+            .join("Arthur C. Clarke")
+            .join("2001")
+            .join("2001.epub"),
+        "",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(audiobooks.join("Philip K. Dick").join("Do Androids Dream")).unwrap();
+    std::fs::write(
+        audiobooks
+            .join("Philip K. Dick")
+            .join("Do Androids Dream")
+            .join("part1.m4b"),
         "",
     )
     .unwrap();
@@ -83,7 +91,11 @@ async fn library_scan_triggers_and_returns_status() {
 
         assert_eq!(status.status(), StatusCode::OK);
         let status_body: Value = json_body(status).await;
-        if status_body.get("completed_at").and_then(Value::as_str).is_some() {
+        if status_body
+            .get("completed_at")
+            .and_then(Value::as_str)
+            .is_some()
+        {
             assert_eq!(status_body["ebooks_found"], 1);
             assert_eq!(status_body["audiobooks_found"], 1);
             assert_eq!(status_body["duplicates_skipped"], 0);
@@ -123,7 +135,11 @@ async fn library_scan_triggers_and_returns_status() {
             .unwrap();
 
         let status_body: Value = json_body(status).await;
-        if status_body.get("completed_at").and_then(Value::as_str).is_some() {
+        if status_body
+            .get("completed_at")
+            .and_then(Value::as_str)
+            .is_some()
+        {
             if status_body["duplicates_skipped"] == 2 {
                 duplicates_reported = true;
                 break;

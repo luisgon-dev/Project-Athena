@@ -19,11 +19,7 @@ impl ProwlarrClient {
         }
     }
 
-    pub async fn search(
-        &self,
-        query: &str,
-        media_type: &str,
-    ) -> Result<Vec<ReleaseCandidate>> {
+    pub async fn search(&self, query: &str, media_type: &str) -> Result<Vec<ReleaseCandidate>> {
         let response = self
             .http
             .get(format!("{}/api/v1/search", self.base_url))
@@ -68,7 +64,8 @@ impl ProwlarrClient {
 
 fn release_candidate_from_value(value: &Value) -> Option<ReleaseCandidate> {
     let object = value.as_object()?;
-    let external_id = string_field(object.get("guid")).or_else(|| string_field(object.get("infoUrl")))?;
+    let external_id =
+        string_field(object.get("guid")).or_else(|| string_field(object.get("infoUrl")))?;
     let title = string_field(object.get("title"))?;
     let protocol = string_field(object.get("protocol")).unwrap_or_else(|| "torrent".to_string());
     let indexer = string_field(object.get("indexer")).unwrap_or_else(|| "Prowlarr".to_string());

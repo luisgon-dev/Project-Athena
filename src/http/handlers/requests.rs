@@ -166,7 +166,8 @@ pub async fn reject_review_candidate(
 
     let remaining = repo.review_queue_for(&id).await?;
     if remaining.is_empty() {
-        SearchWorker::process_request_by_id(state.pool.clone(), state.settings.clone(), &id).await?;
+        SearchWorker::process_request_by_id(state.pool.clone(), state.settings.clone(), &id)
+            .await?;
     } else {
         repo.update_state(&id, "review").await?;
     }

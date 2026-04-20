@@ -1,42 +1,33 @@
-# sv
+# Athena Frontend
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+This directory contains the SvelteKit SPA for Project Athena.
 
-## Creating a project
+## What lives here
 
-If you're seeing this, you've probably already done this step. Congrats!
+- route-level UI for requests, review, settings, and library scan
+- the typed API client under `src/lib/api.ts`
+- browser component tests with Vitest
+- Playwright browser tests in two layers:
+  - mocked browser coverage under `e2e/mocked`
+  - live full-stack coverage under `e2e/fullstack`
 
-```sh
-# create a new project
-npx sv create my-app
-```
+## Key commands
 
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@0.15.1 create --template minimal --types ts --add tailwindcss="plugins:none" sveltekit-adapter="adapter:static" vitest="usages:unit,component" playwright eslint prettier --no-download-check --no-install frontend
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+```bash
+npm ci
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+npm run check
+npm run test:unit -- --run
+npm run test:e2e:mocked
+npm run test:e2e:fullstack
 ```
 
-## Building
+## Notes
 
-To create a production version of your app:
+- `npm run dev` uses the Vite proxy in `vite.config.ts` to send `/api` calls to `http://127.0.0.1:3000`.
+- `npm run build` generates the SPA into `frontend/build`, which the Rust backend serves in production-style runs.
+- The full-stack Playwright suite starts:
+  - a local Open Library fixture server
+  - the real Rust backend with the built frontend mounted
 
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+For overall project setup and operational guidance, use the root `README.md`.
