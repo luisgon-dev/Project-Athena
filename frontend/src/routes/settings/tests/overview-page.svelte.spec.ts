@@ -12,7 +12,8 @@ describe('settings overview page', () => {
 	it('renders the admin settings summary from the JSON api', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi.fn()
+			vi
+				.fn()
 				.mockResolvedValueOnce(
 					new Response(
 						JSON.stringify({
@@ -39,7 +40,13 @@ describe('settings overview page', () => {
 									has_api_key: true
 								}
 							},
-							import: { naming_template: '{author}/{title}/{title}', calibre_command: 'calibredb' },
+							import: {
+								ebook_import_mode: 'managed',
+								ebook_passthrough_root: null,
+								ebook_naming_template: '{author}/{title}/{title}',
+								audiobook_layout_preset: 'author_title',
+								calibre_command: 'calibredb'
+							},
 							acquisition: {
 								minimum_score: 0.7,
 								auto_acquire_score: 0.93,
@@ -60,9 +67,9 @@ describe('settings overview page', () => {
 
 		render(SettingsOverview);
 
-		await expect.element(page.getByRole('heading', { level: 1 })).toHaveTextContent(
-			'Admin settings center'
-		);
+		await expect
+			.element(page.getByRole('heading', { level: 1 }))
+			.toHaveTextContent('Admin settings center');
 		await expect.element(page.getByText('http://localhost:8080')).toBeInTheDocument();
 		await expect.element(page.getByText('http://localhost:9696')).toBeInTheDocument();
 		await expect.element(page.getByText('/ebooks')).toBeInTheDocument();

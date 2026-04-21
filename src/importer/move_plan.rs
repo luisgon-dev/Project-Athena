@@ -1,21 +1,55 @@
 use std::path::{Path, PathBuf};
 
-pub fn build_move_plan(root: &Path, author: &str, work: &str, leaf_name: &str) -> PathBuf {
-    let normalized_author = normalize_path_segment(author);
-    let normalized_work = normalize_path_segment(work);
+use crate::domain::settings::AudiobookLayoutPreset;
+
+pub fn build_ebook_move_plan(
+    root: &Path,
+    template: &str,
+    author: &str,
+    work: &str,
+    leaf_name: &str,
+) -> PathBuf {
+    let mut relative = template
+        .split('/')
+        .filter(|segment| !segment.trim().is_empty())
+        .map(|segment| {
+            normalize_path_segment(&segment.replace("{author}", author).replace("{title}", work))
+        })
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+
     let extension = Path::new(leaf_name)
         .extension()
         .and_then(|extension| extension.to_str())
         .map(|extension| format!(".{extension}"))
         .unwrap_or_default();
-    let normalized_leaf = format!("{normalized_work}{extension}");
 
-    root.join(normalized_author)
-        .join(&normalized_work)
-        .join(normalized_leaf)
+    if let Some(last) = relative.last_mut() {
+        if !extension.is_empty() && !last.ends_with(&extension) {
+            last.push_str(&extension);
+        }
+    }
+
+    relative
+        .into_iter()
+        .fold(root.to_path_buf(), |path, segment| path.join(segment))
 }
 
-fn normalize_path_segment(value: &str) -> String {
+pub fn build_audiobook_root(
+    root: &Path,
+    preset: &AudiobookLayoutPreset,
+    author: &str,
+    work: &str,
+) -> PathBuf {
+    match preset {
+        AudiobookLayoutPreset::AuthorTitle => root
+            .join(normalize_path_segment(author))
+            .join(normalize_path_segment(work)),
+        AudiobookLayoutPreset::Title => root.join(normalize_path_segment(work)),
+    }
+}
+
+pub fn normalize_path_segment(value: &str) -> String {
     let mut normalized = String::with_capacity(value.len());
 
     for character in value.chars() {

@@ -57,6 +57,9 @@ async fn request_detail_includes_review_queue_and_reject_moves_to_no_match() {
             download_url: Some(
                 "magnet:?xt=urn:btih:cccccccccccccccccccccccccccccccccccccccc".into(),
             ),
+            narrator: None,
+            graphic_audio: false,
+            detected_language: None,
         },
         &ScoredCandidate {
             score: 0.75,
@@ -169,6 +172,9 @@ async fn approving_review_candidate_dispatches_to_qbittorrent_and_clears_queue()
             download_url: Some(
                 "magnet:?xt=urn:btih:dddddddddddddddddddddddddddddddddddddddd".into(),
             ),
+            narrator: None,
+            graphic_audio: false,
+            detected_language: None,
         },
         &ScoredCandidate {
             score: 0.75,

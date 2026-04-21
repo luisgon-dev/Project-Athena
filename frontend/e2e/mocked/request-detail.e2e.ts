@@ -8,10 +8,15 @@ test('approves a review candidate from the detail page', async ({ page }) => {
 	await page.goto('/requests/req-1');
 
 	await page.getByRole('heading', { level: 3, name: 'The Hobbit by J.R.R. Tolkien' }).click();
+	await expect(page.getByText('Narrator: Andy Serkis')).toBeVisible();
+	await expect(page.getByText('Language: en')).toBeVisible();
+	await expect(page.getByText('Graphic audio: no')).toBeVisible();
 	await page.getByRole('button', { name: 'Approve' }).click();
 
 	await expect(page.getByText('Candidate approved and dispatched to qBittorrent.')).toBeVisible();
-	await expect(page.getByText('No candidates are waiting for manual review on this request.')).toBeVisible();
+	await expect(
+		page.getByText('No candidates are waiting for manual review on this request.')
+	).toBeVisible();
 });
 
 test('retries a search when the request is eligible for retry', async ({ page }) => {
@@ -52,7 +57,8 @@ test('retries a search when the request is eligible for retry', async ({ page })
 	await page.goto('/requests/req-1');
 	await page.getByRole('button', { name: 'Retry search' }).click();
 
-	await expect(page.getByText('Search retried with the current acquisition settings.')).toBeVisible();
+	await expect(
+		page.getByText('Search retried with the current acquisition settings.')
+	).toBeVisible();
 	await expect(page.getByText('review with 1 qualified candidates; top score 0.97')).toBeVisible();
 });
-

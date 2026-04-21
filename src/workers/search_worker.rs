@@ -221,7 +221,7 @@ impl SearchWorker {
             .preferred_language
             .as_deref()
             .or(settings.acquisition.preferred_language.as_deref())
-            .map(str::to_lowercase);
+            .and_then(normalize_language_preference);
         let blocked_terms = settings
             .acquisition
             .blocked_terms
@@ -234,7 +234,17 @@ impl SearchWorker {
             .filter(|candidate| !contains_blocked_term(candidate, &blocked_terms))
             .filter(|candidate| language_matches(candidate, preferred_language.as_deref()))
             .map(|candidate| {
-                let scored = score_candidate(request, &candidate);
+                let mut scored = score_candidate(request, &candidate);
+                if preferred_language
+                    .as_deref()
+                    .zip(candidate.detected_language.as_deref())
+                    .is_some_and(|(preferred, detected)| preferred == detected)
+                {
+                    scored.score += 0.05;
+                    scored
+                        .explanation
+                        .push("preferred language matched".to_string());
+                }
                 (candidate, scored)
             })
             .filter(|(_, scored)| scored.score >= settings.acquisition.minimum_score)
@@ -260,14 +270,8 @@ fn build_query(request: &RequestRecord, default_language: Option<&str>) -> Strin
             terms.push(narrator.clone());
         }
     }
-    if let Some(language) = request
-        .preferred_language
-        .as_deref()
-        .or(default_language)
-        .filter(|language| !language.is_empty())
-    {
-        terms.push(language.to_string());
-    }
+
+    let _ = default_language;
 
     terms.join(" ")
 }
@@ -284,17 +288,10 @@ fn language_matches(candidate: &ReleaseCandidate, preferred_language: Option<&st
         return true;
     };
 
-    let title = candidate.title.to_lowercase();
-    let tagged_languages = ["en", "eng", "english", "es", "spa", "spanish"];
-    let has_any_tag = tagged_languages
-        .iter()
-        .any(|tag| title.contains(&format!("[{tag}]")) || title.contains(&format!(" {tag} ")));
-    if !has_any_tag {
-        return true;
-    }
-
-    title.contains(&format!("[{preferred_language}]"))
-        || title.contains(&format!(" {preferred_language} "))
+    candidate
+        .detected_language
+        .as_deref()
+        .is_none_or(|detected| detected == preferred_language)
 }
 
 fn dedupe_candidates(candidates: Vec<ReleaseCandidate>) -> Vec<ReleaseCandidate> {
@@ -309,4 +306,42 @@ fn dedupe_candidates(candidates: Vec<ReleaseCandidate>) -> Vec<ReleaseCandidate>
     }
 
     unique
+}
+
+fn normalize_language_preference(value: &str) -> Option<String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "en" | "eng" | "english" => Some("en".to_string()),
+        "es" | "spa" | "spanish" => Some("es".to_string()),
+        "" => None,
+        other => Some(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::requests::{ManifestationPreference, MediaType, RequestRecord};
+
+    use super::{build_query, language_matches};
+    use crate::domain::search::ReleaseCandidate;
+
+    #[test]
+    fn build_query_does_not_append_language() {
+        let request = RequestRecord::for_tests("The Hobbit", "J.R.R. Tolkien", MediaType::Ebook)
+            .with_preferences(ManifestationPreference::default());
+
+        let query = build_query(&request, Some("en"));
+
+        assert_eq!(query, "The Hobbit J.R.R. Tolkien");
+    }
+
+    #[test]
+    fn language_filter_keeps_untagged_and_matching_candidates() {
+        let untagged = ReleaseCandidate::for_tests("The Hobbit EPUB");
+        let matching = ReleaseCandidate::for_tests("The Hobbit [ENG] EPUB");
+        let non_matching = ReleaseCandidate::for_tests("The Hobbit [SPA] EPUB");
+
+        assert!(language_matches(&untagged, Some("en")));
+        assert!(language_matches(&matching, Some("en")));
+        assert!(!language_matches(&non_matching, Some("en")));
+    }
 }

@@ -1,5 +1,8 @@
 use book_router::importer::classify::classify_payload;
-use book_router::importer::move_plan::build_move_plan;
+use book_router::{
+    domain::settings::AudiobookLayoutPreset,
+    importer::move_plan::{build_audiobook_root, build_ebook_move_plan},
+};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -21,8 +24,9 @@ fn epub_file_is_classified_as_ebook() {
 
 #[test]
 fn ebook_move_plan_normalizes_leaf_name_to_work_title() {
-    let destination = build_move_plan(
+    let destination = build_ebook_move_plan(
         Path::new("/ebooks"),
+        "{author}/{title}/{title}",
         "J.R.R. Tolkien",
         "The Hobbit: There and Back Again",
         "The.Hobbit.50th.Anniversary.Release.epub",
@@ -34,4 +38,16 @@ fn ebook_move_plan_normalizes_leaf_name_to_work_title() {
             "/ebooks/J.R.R. Tolkien/The Hobbit There and Back Again/The Hobbit There and Back Again.epub",
         ),
     );
+}
+
+#[test]
+fn audiobook_layout_preset_can_flatten_to_title_root() {
+    let destination = build_audiobook_root(
+        Path::new("/audiobooks"),
+        &AudiobookLayoutPreset::Title,
+        "J.R.R. Tolkien",
+        "The Hobbit",
+    );
+
+    assert_eq!(destination, PathBuf::from("/audiobooks/The Hobbit"));
 }

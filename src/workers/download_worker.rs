@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use crate::{
     db::repositories::{SqliteRequestRepository, SqliteSettingsRepository},
-    domain::{requests::MediaType, search::ReleaseCandidate},
+    domain::{requests::MediaType, search::ReleaseCandidate, settings::PersistedImportSettings},
     downloads::qbittorrent::{QbittorrentClient, QbittorrentTorrent},
     sync::{audiobookshelf::AudiobookshelfClient, calibre::CalibreHook},
     workers::{import_worker::ImportWorker, sync_worker::SyncWorker},
@@ -71,6 +71,7 @@ impl DownloadWorker {
         client: &QbittorrentClient,
         ebooks_root: &Path,
         audiobooks_root: &Path,
+        import_settings: &PersistedImportSettings,
         calibre_hook: &CalibreHook,
         audiobookshelf_client: Option<&AudiobookshelfClient>,
         audiobookshelf_library_id: Option<&str>,
@@ -110,6 +111,7 @@ impl DownloadWorker {
                         &download.request_id,
                         &files,
                         ebooks_root,
+                        import_settings,
                     )
                     .await?;
                     SyncWorker::sync_ebook(
@@ -127,6 +129,7 @@ impl DownloadWorker {
                         &download.request_id,
                         &files,
                         audiobooks_root,
+                        import_settings,
                     )
                     .await?;
                     let client = audiobookshelf_client
@@ -185,6 +188,7 @@ impl DownloadWorker {
             &client,
             Path::new(&settings.storage.ebooks_root),
             Path::new(&settings.storage.audiobooks_root),
+            &settings.import,
             &calibre_hook,
             audiobookshelf.as_ref(),
             Some(&settings.integrations.audiobookshelf.library_id),

@@ -4,6 +4,7 @@ import {
 	approveReviewCandidate,
 	createRequests,
 	getAudiobookshelfSettings,
+	getImportSettings,
 	getQbittorrentSettings,
 	getRequestDetail,
 	listRequests,
@@ -14,6 +15,7 @@ import {
 	testAudiobookshelfSettings,
 	testProwlarrSettings,
 	updateAudiobookshelfSettings,
+	updateImportSettings,
 	updateStorageSettings
 } from './api';
 
@@ -26,14 +28,23 @@ describe('api client', () => {
 	it('lists requests from the phase 2 JSON API', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi.fn().mockResolvedValue(
-				new Response(
-					JSON.stringify([
-						{ id: 'req-1', title: 'The Hobbit', author: 'J.R.R. Tolkien', media_type: 'Ebook', state: 'requested', created_at: '2026-04-10 00:00:00' }
-					]),
-					{ status: 200, headers: { 'content-type': 'application/json' } }
+			vi
+				.fn()
+				.mockResolvedValue(
+					new Response(
+						JSON.stringify([
+							{
+								id: 'req-1',
+								title: 'The Hobbit',
+								author: 'J.R.R. Tolkien',
+								media_type: 'Ebook',
+								state: 'requested',
+								created_at: '2026-04-10 00:00:00'
+							}
+						]),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
 				)
-			)
 		);
 
 		const requests = await listRequests();
@@ -48,7 +59,18 @@ describe('api client', () => {
 			vi.fn().mockResolvedValue(
 				new Response(
 					JSON.stringify({
-						works: [{ external_id: 'OL27448W', title: 'The Hobbit', primary_author: 'J.R.R. Tolkien', first_publish_year: 1937, description: null, cover_id: 2468, subjects: ['Fantasy'], edition_count: 42 }]
+						works: [
+							{
+								external_id: 'OL27448W',
+								title: 'The Hobbit',
+								primary_author: 'J.R.R. Tolkien',
+								first_publish_year: 1937,
+								description: null,
+								cover_id: 2468,
+								subjects: ['Fantasy'],
+								edition_count: 42
+							}
+						]
 					}),
 					{ status: 200, headers: { 'content-type': 'application/json' } }
 				)
@@ -67,14 +89,31 @@ describe('api client', () => {
 	it('posts create payloads as JSON', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi.fn().mockResolvedValue(
-				new Response(
-					JSON.stringify([
-						{ id: 'req-1', external_work_id: 'OL27448W', title: 'The Hobbit', author: 'J.R.R. Tolkien', media_type: 'Ebook', preferred_language: 'en', manifestation: { edition_title: null, preferred_narrator: null, preferred_publisher: null, graphic_audio: false }, state: 'requested', created_at: '2026-04-10 00:00:00' }
-					]),
-					{ status: 201, headers: { 'content-type': 'application/json' } }
+			vi
+				.fn()
+				.mockResolvedValue(
+					new Response(
+						JSON.stringify([
+							{
+								id: 'req-1',
+								external_work_id: 'OL27448W',
+								title: 'The Hobbit',
+								author: 'J.R.R. Tolkien',
+								media_type: 'Ebook',
+								preferred_language: 'en',
+								manifestation: {
+									edition_title: null,
+									preferred_narrator: null,
+									preferred_publisher: null,
+									graphic_audio: false
+								},
+								state: 'requested',
+								created_at: '2026-04-10 00:00:00'
+							}
+						]),
+						{ status: 201, headers: { 'content-type': 'application/json' } }
+					)
 				)
-			)
 		);
 
 		const payload: CreateRequestSelection = {
@@ -116,12 +155,14 @@ describe('api client', () => {
 	it('calls section settings endpoints with JSON payloads', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi.fn().mockResolvedValue(
-				new Response(
-					JSON.stringify({ ebooks_root: '/srv/ebooks', audiobooks_root: '/srv/audiobooks' }),
-					{ status: 200, headers: { 'content-type': 'application/json' } }
+			vi
+				.fn()
+				.mockResolvedValue(
+					new Response(
+						JSON.stringify({ ebooks_root: '/srv/ebooks', audiobooks_root: '/srv/audiobooks' }),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
 				)
-			)
 		);
 
 		const response = await updateStorageSettings({
@@ -140,10 +181,66 @@ describe('api client', () => {
 		expect(response.ebooks_root).toBe('/srv/ebooks');
 	});
 
+	it('loads and updates import settings with media-specific fields', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi
+				.fn()
+				.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							ebook_import_mode: 'managed',
+							ebook_passthrough_root: null,
+							ebook_naming_template: '{author}/{title}/{title}',
+							audiobook_layout_preset: 'author_title',
+							calibre_command: 'calibredb'
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
+				)
+				.mockResolvedValueOnce(
+					new Response(
+						JSON.stringify({
+							ebook_import_mode: 'passthrough',
+							ebook_passthrough_root: '/calibre/inbox',
+							ebook_naming_template: '{author}/{title}/{title}',
+							audiobook_layout_preset: 'title',
+							calibre_command: 'calibredb'
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					)
+				)
+		);
+
+		const loaded = await getImportSettings();
+		const updated = await updateImportSettings({
+			ebook_import_mode: 'passthrough',
+			ebook_passthrough_root: '/calibre/inbox',
+			ebook_naming_template: '{author}/{title}/{title}',
+			audiobook_layout_preset: 'title',
+			calibre_command: 'calibredb'
+		});
+
+		expect(loaded.ebook_import_mode).toBe('managed');
+		expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/settings/import', {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				ebook_import_mode: 'passthrough',
+				ebook_passthrough_root: '/calibre/inbox',
+				ebook_naming_template: '{author}/{title}/{title}',
+				audiobook_layout_preset: 'title',
+				calibre_command: 'calibredb'
+			})
+		});
+		expect(updated.audiobook_layout_preset).toBe('title');
+	});
+
 	it('loads qBittorrent settings and synced indexers from the admin api', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi.fn()
+			vi
+				.fn()
 				.mockResolvedValueOnce(
 					new Response(
 						JSON.stringify({
@@ -220,7 +317,8 @@ describe('api client', () => {
 	it('posts request review actions and retry search actions', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi.fn()
+			vi
+				.fn()
 				.mockResolvedValueOnce(
 					new Response(
 						JSON.stringify({
@@ -302,16 +400,12 @@ describe('api client', () => {
 		await rejectReviewCandidate('req-1', 5n);
 		await retryRequestSearch('req-1');
 
-		expect(fetch).toHaveBeenNthCalledWith(
-			1,
-			'/api/v1/requests/req-1/review-queue/5/approve',
-			{ method: 'POST' }
-		);
-		expect(fetch).toHaveBeenNthCalledWith(
-			2,
-			'/api/v1/requests/req-1/review-queue/5/reject',
-			{ method: 'POST' }
-		);
+		expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/requests/req-1/review-queue/5/approve', {
+			method: 'POST'
+		});
+		expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/requests/req-1/review-queue/5/reject', {
+			method: 'POST'
+		});
 		expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/requests/req-1/retry-search', {
 			method: 'POST'
 		});
@@ -320,7 +414,8 @@ describe('api client', () => {
 	it('loads and updates Audiobookshelf integration settings', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi.fn()
+			vi
+				.fn()
 				.mockResolvedValueOnce(
 					new Response(
 						JSON.stringify({
@@ -372,24 +467,16 @@ describe('api client', () => {
 			'/api/v1/settings/integrations/audiobookshelf',
 			undefined
 		);
-		expect(fetch).toHaveBeenNthCalledWith(
-			2,
-			'/api/v1/settings/integrations/audiobookshelf',
-			{
-				method: 'PUT',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify(payload)
-			}
-		);
-		expect(fetch).toHaveBeenNthCalledWith(
-			3,
-			'/api/v1/settings/integrations/audiobookshelf/test',
-			{
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify(payload)
-			}
-		);
+		expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/settings/integrations/audiobookshelf', {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(payload)
+		});
+		expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/settings/integrations/audiobookshelf/test', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(payload)
+		});
 		expect(result.ok).toBe(true);
 	});
 });

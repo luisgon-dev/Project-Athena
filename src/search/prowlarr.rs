@@ -72,15 +72,21 @@ fn release_candidate_from_value(value: &Value) -> Option<ReleaseCandidate> {
     let size_bytes = i64_field(object.get("size")).unwrap_or_default();
     let download_url = string_field(object.get("downloadUrl"));
 
-    Some(ReleaseCandidate {
-        external_id,
-        source: "prowlarr".to_string(),
-        title,
-        protocol,
-        size_bytes,
-        indexer,
-        download_url,
-    })
+    Some(
+        ReleaseCandidate {
+            external_id,
+            source: "prowlarr".to_string(),
+            title,
+            protocol,
+            size_bytes,
+            indexer,
+            download_url,
+            narrator: None,
+            graphic_audio: false,
+            detected_language: None,
+        }
+        .with_parsed_metadata(),
+    )
 }
 
 fn string_field(value: Option<&Value>) -> Option<String> {

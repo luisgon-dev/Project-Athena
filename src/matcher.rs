@@ -42,7 +42,21 @@ pub fn score_candidate(request: &RequestRecord, candidate: &ReleaseCandidate) ->
         explanation.push("audio format matched".to_string());
     }
 
-    if request.manifestation.graphic_audio && !candidate_title.contains("graphicaudio") {
+    if let Some(preferred_narrator) = request.manifestation.preferred_narrator.as_deref() {
+        let normalized_narrator = normalize(preferred_narrator);
+        let narrator_matched = candidate
+            .narrator
+            .as_deref()
+            .map(normalize)
+            .is_some_and(|narrator| narrator == normalized_narrator)
+            || normalize(&candidate.title).contains(&normalized_narrator);
+        if narrator_matched {
+            score += 0.15;
+            explanation.push("preferred narrator matched".to_string());
+        }
+    }
+
+    if request.manifestation.graphic_audio && !candidate.graphic_audio {
         score -= 0.30;
         explanation.push("graphic audio requested but candidate does not advertise it".to_string());
     }

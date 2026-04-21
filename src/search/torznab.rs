@@ -91,6 +91,10 @@ impl From<TorznabItem> for ReleaseCandidate {
             size_bytes: value.size,
             indexer: "torznab".to_string(),
             download_url: value.link,
+            narrator: None,
+            graphic_audio: false,
+            detected_language: None,
         }
+        .with_parsed_metadata()
     }
 }

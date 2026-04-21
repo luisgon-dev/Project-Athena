@@ -23,6 +23,7 @@ async fn normalizes_prowlarr_results_into_release_candidates() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].source, "prowlarr");
     assert_eq!(results[0].title, "The Hobbit Andy Serkis M4B");
+    assert_eq!(results[0].narrator, None);
 }
 
 #[tokio::test]
@@ -51,4 +52,27 @@ async fn tolerates_partial_or_loose_prowlarr_items() {
     assert_eq!(results[1].external_id, "https://example.invalid/fallback");
     assert_eq!(results[1].protocol, "torrent");
     assert_eq!(results[1].indexer, "Prowlarr");
+}
+
+#[tokio::test]
+async fn parses_candidate_metadata_from_release_titles() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"[
+                {"guid":"abc","title":"The Sandman narrated by Neil Gaiman [ENG] GraphicAudio","size":1234,"protocol":"torrent","indexer":"Books"}
+            ]"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let client = ProwlarrClient::new(server.uri(), "test-api-key");
+    let results = client.search("The Sandman", "audio").await.unwrap();
+
+    assert_eq!(results[0].narrator.as_deref(), Some("Neil Gaiman"));
+    assert!(results[0].graphic_audio);
+    assert_eq!(results[0].detected_language.as_deref(), Some("en"));
 }

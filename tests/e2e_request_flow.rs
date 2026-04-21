@@ -1,11 +1,12 @@
 use std::{fs, path::Path};
 
 use book_router::{
-    config::DatabaseTarget,
+    config::{AppConfig, DatabaseTarget},
     db::{connect_sqlite, repositories::SqliteRequestRepository},
     domain::{
         requests::{CreateRequest, ManifestationPreference, MediaType},
         search::ReleaseCandidate,
+        settings::{AudiobookLayoutPreset, EbookImportMode, PersistedRuntimeSettings},
     },
     downloads::qbittorrent::QbittorrentClient,
     sync::{audiobookshelf::AudiobookshelfClient, calibre::CalibreHook},
@@ -44,6 +45,7 @@ async fn request_to_import_flow_records_success_events() {
     let candidate = ReleaseCandidate::for_tests("The Hobbit EPUB");
     let source_file = downloads_root.join("The Hobbit.epub");
     fs::write(&source_file, b"ebook payload").unwrap();
+    let import_settings = PersistedRuntimeSettings::from_config(&AppConfig::for_tests()).import;
 
     DownloadWorker::record_approved_candidate(&repo, &request.id, &candidate)
         .await
@@ -53,6 +55,7 @@ async fn request_to_import_flow_records_success_events() {
         &request.id,
         &[source_file.display().to_string()],
         &ebooks_root,
+        &import_settings,
     )
     .await
     .unwrap();
@@ -108,12 +111,14 @@ async fn ebook_request_moves_file_and_runs_calibre_hook() {
 
     let source_file = downloads_root.join("The.Hobbit.50th.Anniversary.Release.epub");
     fs::write(&source_file, b"ebook payload").unwrap();
+    let import_settings = PersistedRuntimeSettings::from_config(&AppConfig::for_tests()).import;
 
     let moved_path = ImportWorker::import_completed_ebook(
         &repo,
         &request.id,
         &[source_file.display().to_string()],
         &ebooks_root,
+        &import_settings,
     )
     .await
     .unwrap();
@@ -252,6 +257,9 @@ async fn ebook_request_dispatches_to_qbittorrent_and_completes_via_polling() {
         download_url: Some(
             "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=The+Hobbit".into(),
         ),
+        narrator: None,
+        graphic_audio: false,
+        detected_language: None,
     };
 
     let client = QbittorrentClient::new(server.uri(), "admin", "adminadmin");
@@ -263,12 +271,14 @@ async fn ebook_request_dispatches_to_qbittorrent_and_completes_via_polling() {
     let log_path = tempdir.path().join("calibre.log");
     write_fake_calibre(&script_path, &log_path);
     let hook = CalibreHook::new(&script_path);
+    let import_settings = PersistedRuntimeSettings::from_config(&AppConfig::for_tests()).import;
 
     let processed = DownloadWorker::poll_qbittorrent_once(
         &repo,
         &client,
         &ebooks_root,
         &tempdir.path().join("audiobooks"),
+        &import_settings,
         &hook,
         None,
         None,
@@ -397,17 +407,22 @@ async fn audiobook_request_dispatches_imports_and_syncs_with_audiobookshelf() {
         download_url: Some(
             "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&dn=The+Hobbit".into(),
         ),
+        narrator: None,
+        graphic_audio: false,
+        detected_language: None,
     };
     let client = QbittorrentClient::new(server.uri(), "admin", "adminadmin");
     DownloadWorker::dispatch_approved_candidate(&repo, &client, &request.id, &candidate)
         .await
         .unwrap();
+    let import_settings = PersistedRuntimeSettings::from_config(&AppConfig::for_tests()).import;
 
     let processed = DownloadWorker::poll_qbittorrent_once(
         &repo,
         &client,
         &ebooks_root,
         &audiobooks_root,
+        &import_settings,
         &CalibreHook::new("/usr/bin/false"),
         Some(&AudiobookshelfClient::new(abs_server.uri(), "abs-key")),
         Some("library-1"),
@@ -422,4 +437,106 @@ async fn audiobook_request_dispatches_imports_and_syncs_with_audiobookshelf() {
     assert_eq!(updated.state, "synced");
     assert!(final_dir.exists());
     assert!(!source_file.exists());
+}
+
+#[tokio::test]
+async fn ebook_passthrough_mode_preserves_original_filename_in_request_folder() {
+    let pool = connect_sqlite(&DatabaseTarget::memory()).await.unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let repo = SqliteRequestRepository::new(pool);
+    let tempdir = tempfile::tempdir().unwrap();
+    let downloads_root = tempdir.path().join("downloads");
+    let passthrough_root = tempdir.path().join("calibre-inbox");
+    fs::create_dir_all(&downloads_root).unwrap();
+    fs::create_dir_all(&passthrough_root).unwrap();
+
+    let request = repo
+        .create(CreateRequest {
+            external_work_id: "OL27448W".into(),
+            title: "The Hobbit".into(),
+            author: "J.R.R. Tolkien".into(),
+            media_type: MediaType::Ebook,
+            preferred_language: Some("en".into()),
+            manifestation: ManifestationPreference::default(),
+        })
+        .await
+        .unwrap();
+
+    let source_file = downloads_root.join("The.Hobbit.Special.Release.epub");
+    fs::write(&source_file, b"ebook payload").unwrap();
+
+    let mut import_settings = PersistedRuntimeSettings::from_config(&AppConfig::for_tests()).import;
+    import_settings.ebook_import_mode = EbookImportMode::Passthrough;
+    import_settings.ebook_passthrough_root = Some(passthrough_root.display().to_string());
+
+    let moved_path = ImportWorker::import_completed_ebook(
+        &repo,
+        &request.id,
+        &[source_file.display().to_string()],
+        tempdir.path(),
+        &import_settings,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        moved_path,
+        passthrough_root
+            .join(&request.id)
+            .join("The.Hobbit.Special.Release.epub")
+    );
+    assert!(moved_path.exists());
+    assert!(!source_file.exists());
+}
+
+#[tokio::test]
+async fn audiobook_title_layout_uses_title_as_root_folder() {
+    let pool = connect_sqlite(&DatabaseTarget::memory()).await.unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let repo = SqliteRequestRepository::new(pool);
+    let tempdir = tempfile::tempdir().unwrap();
+    let downloads_root = tempdir.path().join("downloads");
+    let audiobooks_root = tempdir.path().join("audiobooks");
+    fs::create_dir_all(downloads_root.join("Disc 1")).unwrap();
+    fs::create_dir_all(downloads_root.join("Disc 2")).unwrap();
+    fs::create_dir_all(&audiobooks_root).unwrap();
+
+    let request = repo
+        .create(CreateRequest {
+            external_work_id: "OL27448W".into(),
+            title: "The Hobbit".into(),
+            author: "J.R.R. Tolkien".into(),
+            media_type: MediaType::Audiobook,
+            preferred_language: Some("en".into()),
+            manifestation: ManifestationPreference::default(),
+        })
+        .await
+        .unwrap();
+
+    let source_file = downloads_root.join("Disc 1").join("part01.m4b");
+    fs::write(&source_file, b"audiobook payload").unwrap();
+    let source_file_two = downloads_root.join("Disc 2").join("part02.m4b");
+    fs::write(&source_file_two, b"audiobook payload").unwrap();
+
+    let mut import_settings = PersistedRuntimeSettings::from_config(&AppConfig::for_tests()).import;
+    import_settings.audiobook_layout_preset = AudiobookLayoutPreset::Title;
+
+    let moved_path = ImportWorker::import_completed_audiobook(
+        &repo,
+        &request.id,
+        &[
+            source_file.display().to_string(),
+            source_file_two.display().to_string(),
+        ],
+        &audiobooks_root,
+        &import_settings,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(moved_path, audiobooks_root.join("The Hobbit"));
+    assert!(moved_path.join("Disc 1").join("part01.m4b").exists());
+    assert!(moved_path.join("Disc 2").join("part02.m4b").exists());
+    assert!(!source_file.exists());
+    assert!(!source_file_two.exists());
 }

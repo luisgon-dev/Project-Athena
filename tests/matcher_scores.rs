@@ -22,3 +22,20 @@ fn graphic_audio_preference_penalizes_plain_audio_release() {
     assert!(scored.score < 0.80);
     assert!(scored.explanation.join(" ").contains("graphic audio"));
 }
+
+#[test]
+fn narrator_match_increases_audiobook_score() {
+    let request = RequestRecord::for_tests("The Hobbit", "J.R.R. Tolkien", MediaType::Audiobook)
+        .with_preferences(ManifestationPreference {
+            edition_title: None,
+            preferred_narrator: Some("Andy Serkis".into()),
+            preferred_publisher: None,
+            graphic_audio: false,
+        });
+
+    let candidate = ReleaseCandidate::for_tests("The Hobbit narrated by Andy Serkis M4B");
+    let scored = score_candidate(&request, &candidate);
+
+    assert!(scored.score >= 0.85);
+    assert!(scored.explanation.join(" ").contains("preferred narrator"));
+}

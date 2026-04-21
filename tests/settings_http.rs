@@ -41,6 +41,13 @@ async fn runtime_settings_are_seeded_from_bootstrap_config() {
         body["download_clients"]["qbittorrent"]["has_password"],
         false
     );
+    assert_eq!(body["import"]["ebook_import_mode"], "managed");
+    assert_eq!(body["import"]["ebook_passthrough_root"], Value::Null);
+    assert_eq!(
+        body["import"]["ebook_naming_template"],
+        "{author}/{title}/{title}"
+    );
+    assert_eq!(body["import"]["audiobook_layout_preset"], "author_title");
 }
 
 #[tokio::test]
@@ -217,6 +224,35 @@ async fn system_status_reports_a_version_for_prowlarr_handshake() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
     assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+}
+
+#[tokio::test]
+async fn import_settings_require_a_passthrough_root_in_passthrough_mode() {
+    let app = build_app(AppConfig::for_tests()).await.unwrap();
+
+    let response = app
+        .oneshot(json_request(
+            "PUT",
+            &format!("{API_PREFIX}/settings/import"),
+            json!({
+                "ebook_import_mode": "passthrough",
+                "ebook_passthrough_root": "",
+                "ebook_naming_template": "{author}/{title}/{title}",
+                "audiobook_layout_preset": "title",
+                "calibre_command": "calibredb"
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = json_body(response).await;
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("ebook passthrough root")
+    );
 }
 
 fn json_request(method: &str, uri: &str, body: Value) -> Request<Body> {

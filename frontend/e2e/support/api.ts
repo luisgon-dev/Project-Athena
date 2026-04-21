@@ -39,16 +39,37 @@ function requestRecord(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function requestDetail(overrides: {
-	request?: Record<string, unknown>;
-	review_queue?: Array<Record<string, unknown>>;
-	events?: Array<Record<string, unknown>>;
-} = {}) {
+function requestDetail(
+	overrides: {
+		request?: Record<string, unknown>;
+		review_queue?: Array<Record<string, unknown>>;
+		events?: Array<Record<string, unknown>>;
+	} = {}
+) {
 	const request = requestRecord(overrides.request);
 	return {
 		request,
-		review_queue:
-			overrides.review_queue?.map((entry) => ({
+		review_queue: overrides.review_queue?.map((entry) => ({
+			id: 1,
+			request_id: request.id,
+			candidate: {
+				external_id: 'cand-1',
+				source: 'Prowlarr',
+				title: 'The Hobbit by J.R.R. Tolkien',
+				protocol: 'torrent',
+				size_bytes: 987654321,
+				indexer: 'indexer-1',
+				download_url: 'magnet:?xt=urn:btih:abcdef',
+				narrator: 'Andy Serkis',
+				graphic_audio: false,
+				detected_language: 'en'
+			},
+			score: 0.97,
+			explanation: ['Exact title match', 'Preferred narrator matched'],
+			created_at: '2026-04-20 10:01:00',
+			...entry
+		})) ?? [
+			{
 				id: 1,
 				request_id: request.id,
 				candidate: {
@@ -58,32 +79,29 @@ function requestDetail(overrides: {
 					protocol: 'torrent',
 					size_bytes: 987654321,
 					indexer: 'indexer-1',
-					download_url: 'magnet:?xt=urn:btih:abcdef'
+					download_url: 'magnet:?xt=urn:btih:abcdef',
+					narrator: 'Andy Serkis',
+					graphic_audio: false,
+					detected_language: 'en'
 				},
 				score: 0.97,
 				explanation: ['Exact title match', 'Preferred narrator matched'],
-				created_at: '2026-04-20 10:01:00',
-				...entry
-			})) ?? [
-				{
-					id: 1,
-					request_id: request.id,
-					candidate: {
-						external_id: 'cand-1',
-						source: 'Prowlarr',
-						title: 'The Hobbit by J.R.R. Tolkien',
-						protocol: 'torrent',
-						size_bytes: 987654321,
-						indexer: 'indexer-1',
-						download_url: 'magnet:?xt=urn:btih:abcdef'
-					},
-					score: 0.97,
-					explanation: ['Exact title match', 'Preferred narrator matched'],
-					created_at: '2026-04-20 10:01:00'
-				}
-			],
-		events:
-			overrides.events?.map((event) => ({
+				created_at: '2026-04-20 10:01:00'
+			}
+		],
+		events: overrides.events?.map((event) => ({
+			id: 1,
+			request_id: request.id,
+			kind: 'Created',
+			payload_json: JSON.stringify({
+				title: request.title,
+				author: request.author,
+				media_type: request.media_type
+			}),
+			created_at: '2026-04-20 10:00:00',
+			...event
+		})) ?? [
+			{
 				id: 1,
 				request_id: request.id,
 				kind: 'Created',
@@ -92,30 +110,18 @@ function requestDetail(overrides: {
 					author: request.author,
 					media_type: request.media_type
 				}),
-				created_at: '2026-04-20 10:00:00',
-				...event
-			})) ?? [
-				{
-					id: 1,
-					request_id: request.id,
-					kind: 'Created',
-					payload_json: JSON.stringify({
-						title: request.title,
-						author: request.author,
-						media_type: request.media_type
-					}),
-					created_at: '2026-04-20 10:00:00'
-				},
-				{
-					id: 2,
-					request_id: request.id,
-					kind: 'ReviewQueued',
-					payload_json: JSON.stringify({
-						queued_candidates: 1
-					}),
-					created_at: '2026-04-20 10:01:00'
-				}
-			]
+				created_at: '2026-04-20 10:00:00'
+			},
+			{
+				id: 2,
+				request_id: request.id,
+				kind: 'ReviewQueued',
+				payload_json: JSON.stringify({
+					queued_candidates: 1
+				}),
+				created_at: '2026-04-20 10:01:00'
+			}
+		]
 	};
 }
 
@@ -151,7 +157,10 @@ function runtimeSettings() {
 			}
 		},
 		import: {
-			naming_template: '{author}/{title}/{title}',
+			ebook_import_mode: 'managed',
+			ebook_passthrough_root: null,
+			ebook_naming_template: '{author}/{title}/{title}',
+			audiobook_layout_preset: 'author_title',
 			calibre_command: 'calibredb'
 		},
 		acquisition: {

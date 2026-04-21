@@ -8,13 +8,14 @@ use book_router::domain::{
     },
     search::{ReleaseCandidate, ReviewQueueEntry},
     settings::{
-        AcquisitionSettingsRecord, AcquisitionSettingsUpdate, AudiobookshelfIntegrationRecord,
-        AudiobookshelfIntegrationUpdate, ConnectionTestResult, DownloadClientSettingsRecord,
-        DownloadClientSettingsUpdate, ImportSettingsRecord, ImportSettingsUpdate,
-        IntegrationSettingsRecord, IntegrationSettingsUpdate, MetadataSettingsRecord,
-        MetadataSettingsUpdate, ProwlarrIntegrationRecord, ProwlarrIntegrationUpdate,
-        QbittorrentSettingsRecord, QbittorrentSettingsUpdate, RuntimeSettingsRecord,
-        RuntimeSettingsUpdate, StorageSettingsRecord, StorageSettingsUpdate, SyncedIndexerRecord,
+        AcquisitionSettingsRecord, AcquisitionSettingsUpdate, AudiobookLayoutPreset,
+        AudiobookshelfIntegrationRecord, AudiobookshelfIntegrationUpdate, ConnectionTestResult,
+        DownloadClientSettingsRecord, DownloadClientSettingsUpdate, EbookImportMode,
+        ImportSettingsRecord, ImportSettingsUpdate, IntegrationSettingsRecord,
+        IntegrationSettingsUpdate, MetadataSettingsRecord, MetadataSettingsUpdate,
+        ProwlarrIntegrationRecord, ProwlarrIntegrationUpdate, QbittorrentSettingsRecord,
+        QbittorrentSettingsUpdate, RuntimeSettingsRecord, RuntimeSettingsUpdate,
+        StorageSettingsRecord, StorageSettingsUpdate, SyncedIndexerRecord,
     },
 };
 use ts_rs::TS;
@@ -45,6 +46,8 @@ fn export_types() {
     ProwlarrIntegrationUpdate::export_all_to("frontend/src/lib/types/").unwrap();
     AudiobookshelfIntegrationRecord::export_all_to("frontend/src/lib/types/").unwrap();
     AudiobookshelfIntegrationUpdate::export_all_to("frontend/src/lib/types/").unwrap();
+    EbookImportMode::export_all_to("frontend/src/lib/types/").unwrap();
+    AudiobookLayoutPreset::export_all_to("frontend/src/lib/types/").unwrap();
     ImportSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();
     ImportSettingsUpdate::export_all_to("frontend/src/lib/types/").unwrap();
     AcquisitionSettingsRecord::export_all_to("frontend/src/lib/types/").unwrap();

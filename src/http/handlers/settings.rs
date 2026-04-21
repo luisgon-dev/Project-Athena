@@ -25,7 +25,13 @@ pub async fn update_runtime_settings(
     State(state): State<AppState>,
     Json(payload): Json<RuntimeSettingsUpdate>,
 ) -> Result<Json<RuntimeSettingsRecord>, AppError> {
-    Ok(Json(state.settings.update_runtime_settings(payload).await?))
+    Ok(Json(
+        state
+            .settings
+            .update_runtime_settings(payload)
+            .await
+            .map_err(map_settings_error)?,
+    ))
 }
 
 pub async fn get_storage_settings(
@@ -44,7 +50,8 @@ pub async fn update_storage_settings(
             storage: Some(payload),
             ..RuntimeSettingsUpdate::default()
         })
-        .await?;
+        .await
+        .map_err(map_settings_error)?;
     Ok(Json(settings.storage))
 }
 
@@ -64,7 +71,8 @@ pub async fn update_import_settings(
             import: Some(payload),
             ..RuntimeSettingsUpdate::default()
         })
-        .await?;
+        .await
+        .map_err(map_settings_error)?;
     Ok(Json(settings.import))
 }
 
@@ -86,7 +94,8 @@ pub async fn update_acquisition_settings(
             acquisition: Some(payload),
             ..RuntimeSettingsUpdate::default()
         })
-        .await?;
+        .await
+        .map_err(map_settings_error)?;
     Ok(Json(settings.acquisition))
 }
 
@@ -115,7 +124,8 @@ pub async fn update_qbittorrent_settings(
             }),
             ..RuntimeSettingsUpdate::default()
         })
-        .await?;
+        .await
+        .map_err(map_settings_error)?;
     Ok(Json(settings.download_clients.qbittorrent))
 }
 
@@ -183,7 +193,8 @@ pub async fn update_prowlarr_settings(
             }),
             ..RuntimeSettingsUpdate::default()
         })
-        .await?;
+        .await
+        .map_err(map_settings_error)?;
     Ok(Json(settings.integrations.prowlarr))
 }
 
@@ -213,7 +224,8 @@ pub async fn update_audiobookshelf_settings(
             }),
             ..RuntimeSettingsUpdate::default()
         })
-        .await?;
+        .await
+        .map_err(map_settings_error)?;
     Ok(Json(settings.integrations.audiobookshelf))
 }
 
@@ -335,6 +347,10 @@ async fn preview_settings(
         .await?
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("runtime settings row missing")))?;
     settings.apply_update(update);
-    settings.validate()?;
+    settings.validate().map_err(map_settings_error)?;
     Ok(settings)
+}
+
+fn map_settings_error(error: anyhow::Error) -> AppError {
+    AppError::BadRequest(error.to_string())
 }

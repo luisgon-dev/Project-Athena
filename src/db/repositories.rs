@@ -380,9 +380,10 @@ impl SqliteRequestRepository {
                 candidate_size_bytes,
                 candidate_indexer,
                 candidate_download_url,
+                candidate_metadata_json,
                 score,
                 explanation_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(request_id)
         .bind(&candidate.external_id)
@@ -392,6 +393,7 @@ impl SqliteRequestRepository {
         .bind(candidate.size_bytes)
         .bind(&candidate.indexer)
         .bind(candidate.download_url.as_deref())
+        .bind(candidate_metadata_json(candidate)?)
         .bind(scored.score)
         .bind(serde_json::to_string(&scored.explanation)?)
         .execute(&self.pool)
@@ -412,6 +414,7 @@ impl SqliteRequestRepository {
                 candidate_size_bytes,
                 candidate_indexer,
                 candidate_download_url,
+                candidate_metadata_json,
                 score,
                 explanation_json,
                 created_at
@@ -428,15 +431,7 @@ impl SqliteRequestRepository {
                 Ok(ReviewQueueEntry {
                     id: row.get::<i64, _>("id"),
                     request_id: row.get::<String, _>("request_id"),
-                    candidate: ReleaseCandidate {
-                        external_id: row.get::<String, _>("candidate_external_id"),
-                        source: row.get::<String, _>("candidate_source"),
-                        title: row.get::<String, _>("candidate_title"),
-                        protocol: row.get::<String, _>("candidate_protocol"),
-                        size_bytes: row.get::<i64, _>("candidate_size_bytes"),
-                        indexer: row.get::<String, _>("candidate_indexer"),
-                        download_url: row.get::<Option<String>, _>("candidate_download_url"),
-                    },
+                    candidate: candidate_from_review_queue_row(&row)?,
                     score: row.get::<f32, _>("score"),
                     explanation: serde_json::from_str(
                         row.get::<String, _>("explanation_json").as_str(),
@@ -463,6 +458,7 @@ impl SqliteRequestRepository {
                 candidate_size_bytes,
                 candidate_indexer,
                 candidate_download_url,
+                candidate_metadata_json,
                 score,
                 explanation_json,
                 created_at
@@ -478,15 +474,7 @@ impl SqliteRequestRepository {
             Ok(ReviewQueueEntry {
                 id: row.get::<i64, _>("id"),
                 request_id: row.get::<String, _>("request_id"),
-                candidate: ReleaseCandidate {
-                    external_id: row.get::<String, _>("candidate_external_id"),
-                    source: row.get::<String, _>("candidate_source"),
-                    title: row.get::<String, _>("candidate_title"),
-                    protocol: row.get::<String, _>("candidate_protocol"),
-                    size_bytes: row.get::<i64, _>("candidate_size_bytes"),
-                    indexer: row.get::<String, _>("candidate_indexer"),
-                    download_url: row.get::<Option<String>, _>("candidate_download_url"),
-                },
+                candidate: candidate_from_review_queue_row(&row)?,
                 score: row.get::<f32, _>("score"),
                 explanation: serde_json::from_str(
                     row.get::<String, _>("explanation_json").as_str(),
@@ -1210,6 +1198,38 @@ fn row_to_synced_indexer_record(row: sqlx::sqlite::SqliteRow) -> Result<SyncedIn
         categories: serde_json::from_str(row.get::<String, _>("categories_json").as_str())?,
         last_synced_at: row.get::<String, _>("last_synced_at"),
     })
+}
+
+fn candidate_from_review_queue_row(row: &sqlx::sqlite::SqliteRow) -> Result<ReleaseCandidate> {
+    let metadata_json = row.get::<Option<String>, _>("candidate_metadata_json");
+    let metadata = metadata_json
+        .as_deref()
+        .map(serde_json::from_str::<crate::domain::search::ParsedTitleMetadata>)
+        .transpose()?
+        .unwrap_or_default();
+
+    Ok(ReleaseCandidate {
+        external_id: row.get::<String, _>("candidate_external_id"),
+        source: row.get::<String, _>("candidate_source"),
+        title: row.get::<String, _>("candidate_title"),
+        protocol: row.get::<String, _>("candidate_protocol"),
+        size_bytes: row.get::<i64, _>("candidate_size_bytes"),
+        indexer: row.get::<String, _>("candidate_indexer"),
+        download_url: row.get::<Option<String>, _>("candidate_download_url"),
+        narrator: metadata.narrator,
+        graphic_audio: metadata.graphic_audio,
+        detected_language: metadata.detected_language,
+    })
+}
+
+fn candidate_metadata_json(candidate: &ReleaseCandidate) -> Result<String> {
+    Ok(serde_json::to_string(
+        &crate::domain::search::ParsedTitleMetadata {
+            narrator: candidate.narrator.clone(),
+            graphic_audio: candidate.graphic_audio,
+            detected_language: candidate.detected_language.clone(),
+        },
+    )?)
 }
 
 fn row_to_indexer_resource(row: sqlx::sqlite::SqliteRow) -> Result<Value> {

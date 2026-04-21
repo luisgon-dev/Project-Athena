@@ -78,6 +78,18 @@
 		return score.toFixed(2);
 	}
 
+	function candidateMetadataSummary(candidate: ReviewQueueEntry): string[] {
+		const parts = [] as string[];
+		if (candidate.candidate.narrator) {
+			parts.push(`Narrator: ${candidate.candidate.narrator}`);
+		}
+		if (candidate.candidate.detected_language) {
+			parts.push(`Language: ${candidate.candidate.detected_language}`);
+		}
+		parts.push(`Graphic audio: ${candidate.candidate.graphic_audio ? 'yes' : 'no'}`);
+		return parts;
+	}
+
 	async function runRefreshableAction(
 		task: () => Promise<RequestDetailRecord>,
 		successMessage: string,
@@ -92,8 +104,7 @@
 			detail = await task();
 			actionSuccess = successMessage;
 		} catch (taskError) {
-			actionError =
-				taskError instanceof Error ? taskError.message : 'The request action failed.';
+			actionError = taskError instanceof Error ? taskError.message : 'The request action failed.';
 		} finally {
 			actingCandidateId = null;
 			actingAction = '';
@@ -125,8 +136,7 @@
 			detail = await retryRequestSearch(requestId());
 			actionSuccess = 'Search retried with the current acquisition settings.';
 		} catch (retryError) {
-			actionError =
-				retryError instanceof Error ? retryError.message : 'The search retry failed.';
+			actionError = retryError instanceof Error ? retryError.message : 'The search retry failed.';
 		} finally {
 			retrying = false;
 		}
@@ -169,40 +179,54 @@
 			<span>Loading request detail from the JSON API…</span>
 		</section>
 	{:else if error}
-		<section class="dashboard-card rounded-[1.6rem] border border-red-200 bg-red-50 text-sm text-red-700">
+		<section
+			class="dashboard-card rounded-[1.6rem] border border-red-200 bg-red-50 text-sm text-red-700"
+		>
 			{error}
 		</section>
 	{:else if detail}
 		<div class="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.85fr)]">
 			<section class="space-y-6">
-				<div class="dashboard-card overflow-hidden bg-[linear-gradient(135deg,rgba(12,74,110,0.96),rgba(15,118,110,0.84))] text-stone-50">
+				<div
+					class="dashboard-card overflow-hidden bg-[linear-gradient(135deg,rgba(12,74,110,0.96),rgba(15,118,110,0.84))] text-stone-50"
+				>
 					<div class="space-y-4">
 						<div class="flex flex-wrap gap-2">
-							<span class="status-pill border-white/20 bg-white/10 text-stone-50">{detail.request.state}</span>
-							<span class="status-pill border-white/20 bg-white/10 text-stone-50">{detail.request.media_type}</span>
+							<span class="status-pill border-white/20 bg-white/10 text-stone-50"
+								>{detail.request.state}</span
+							>
+							<span class="status-pill border-white/20 bg-white/10 text-stone-50"
+								>{detail.request.media_type}</span
+							>
 						</div>
 						<div class="flex flex-wrap items-start justify-between gap-4">
 							<div class="space-y-3">
-								<h1 class="font-serif text-4xl font-semibold tracking-tight">{detail.request.title}</h1>
+								<h1 class="font-serif text-4xl font-semibold tracking-tight">
+									{detail.request.title}
+								</h1>
 								<p class="text-base text-stone-200">{detail.request.author}</p>
 							</div>
 							<div class="min-w-[12rem] rounded-[1.35rem] border border-white/15 bg-white/10 p-4">
-								<p class="text-xs uppercase tracking-[0.2em] text-stone-300">Review queue</p>
+								<p class="text-xs tracking-[0.2em] text-stone-300 uppercase">Review queue</p>
 								<p class="mt-2 font-serif text-3xl text-stone-50">{detail.review_queue.length}</p>
 								<p class="mt-1 text-sm text-stone-200">Manual candidates currently waiting.</p>
 							</div>
 						</div>
 						<div class="grid gap-4 sm:grid-cols-3">
 							<div class="rounded-[1.35rem] border border-white/15 bg-white/10 p-4">
-								<p class="text-xs uppercase tracking-[0.2em] text-stone-300">Canonical work</p>
-								<p class="mt-2 font-medium text-stone-50">{detail.request.external_work_id || 'Unresolved'}</p>
+								<p class="text-xs tracking-[0.2em] text-stone-300 uppercase">Canonical work</p>
+								<p class="mt-2 font-medium text-stone-50">
+									{detail.request.external_work_id || 'Unresolved'}
+								</p>
 							</div>
 							<div class="rounded-[1.35rem] border border-white/15 bg-white/10 p-4">
-								<p class="text-xs uppercase tracking-[0.2em] text-stone-300">Preferred language</p>
-								<p class="mt-2 font-medium text-stone-50">{detail.request.preferred_language ?? 'Any'}</p>
+								<p class="text-xs tracking-[0.2em] text-stone-300 uppercase">Preferred language</p>
+								<p class="mt-2 font-medium text-stone-50">
+									{detail.request.preferred_language ?? 'Any'}
+								</p>
 							</div>
 							<div class="rounded-[1.35rem] border border-white/15 bg-white/10 p-4">
-								<p class="text-xs uppercase tracking-[0.2em] text-stone-300">Created</p>
+								<p class="text-xs tracking-[0.2em] text-stone-300 uppercase">Created</p>
 								<p class="mt-2 font-medium text-stone-50">{detail.request.created_at}</p>
 							</div>
 						</div>
@@ -212,14 +236,14 @@
 				<div class="dashboard-card space-y-4">
 					<div class="flex flex-wrap items-start justify-between gap-4">
 						<div>
-						<p class="eyebrow">
-							<ScanSearch class="h-4 w-4" />
-							<span>Review queue</span>
-						</p>
-						<h2 class="mt-3 font-serif text-2xl text-stone-950">Candidate review</h2>
+							<p class="eyebrow">
+								<ScanSearch class="h-4 w-4" />
+								<span>Review queue</span>
+							</p>
+							<h2 class="mt-3 font-serif text-2xl text-stone-950">Candidate review</h2>
 							<p class="mt-2 text-sm leading-6 text-stone-600">
-								Each candidate expands in place so the page stays compact while still exposing
-								score reasons, source metadata, and approval controls.
+								Each candidate expands in place so the page stays compact while still exposing score
+								reasons, source metadata, and approval controls.
 							</p>
 						</div>
 						<span class="status-pill bg-stone-900/8 text-stone-900">
@@ -234,7 +258,9 @@
 					{:else}
 						<div class="space-y-4">
 							{#each detail.review_queue as candidate}
-								<details class="rounded-[1.5rem] border border-stone-200 bg-stone-50/95 p-5 open:shadow-sm">
+								<details
+									class="rounded-[1.5rem] border border-stone-200 bg-stone-50/95 p-5 open:shadow-sm"
+								>
 									<summary class="cursor-pointer list-none">
 										<div class="flex flex-wrap items-start justify-between gap-4">
 											<div class="space-y-2">
@@ -249,12 +275,16 @@
 														{candidate.candidate.indexer}
 													</span>
 												</div>
-												<h3 class="font-serif text-2xl text-stone-950">{candidate.candidate.title}</h3>
+												<h3 class="font-serif text-2xl text-stone-950">
+													{candidate.candidate.title}
+												</h3>
 												<p class="text-sm text-stone-600">
-													Protocol: {candidate.candidate.protocol} · Size: {String(candidate.candidate.size_bytes)} bytes
+													Protocol: {candidate.candidate.protocol} · Size: {String(
+														candidate.candidate.size_bytes
+													)} bytes
 												</p>
 											</div>
-											<span class="text-xs uppercase tracking-[0.18em] text-stone-400">Expand</span>
+											<span class="text-xs tracking-[0.18em] text-stone-400 uppercase">Expand</span>
 										</div>
 									</summary>
 
@@ -267,8 +297,14 @@
 											</ul>
 										{/if}
 
+										<ul class="grid gap-2 text-sm text-stone-600">
+											{#each candidateMetadataSummary(candidate) as metadataLine}
+												<li class="rounded-[1.2rem] bg-white px-3 py-2">{metadataLine}</li>
+											{/each}
+										</ul>
+
 										{#if candidate.candidate.download_url}
-											<p class="text-sm text-stone-600 break-all">
+											<p class="text-sm break-all text-stone-600">
 												Download URL:
 												<a
 													class="text-teal-900 underline decoration-teal-900/30 underline-offset-4"
@@ -336,12 +372,16 @@
 					</div>
 
 					{#if actionError}
-						<div class="rounded-[1.35rem] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+						<div
+							class="rounded-[1.35rem] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+						>
 							{actionError}
 						</div>
 					{/if}
 					{#if actionSuccess}
-						<div class="rounded-[1.35rem] border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">
+						<div
+							class="rounded-[1.35rem] border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900"
+						>
 							{actionSuccess}
 						</div>
 					{/if}
@@ -357,19 +397,25 @@
 					</div>
 					<div class="grid gap-3">
 						<div class="rounded-[1.45rem] bg-stone-100/90 p-4">
-							<p class="text-xs uppercase tracking-[0.2em] text-stone-500">Edition title</p>
-							<p class="mt-2 text-sm text-stone-800">{detail.request.manifestation.edition_title ?? 'Any'}</p>
+							<p class="text-xs tracking-[0.2em] text-stone-500 uppercase">Edition title</p>
+							<p class="mt-2 text-sm text-stone-800">
+								{detail.request.manifestation.edition_title ?? 'Any'}
+							</p>
 						</div>
 						<div class="rounded-[1.45rem] bg-stone-100/90 p-4">
-							<p class="text-xs uppercase tracking-[0.2em] text-stone-500">Preferred narrator</p>
-							<p class="mt-2 text-sm text-stone-800">{detail.request.manifestation.preferred_narrator ?? 'Any'}</p>
+							<p class="text-xs tracking-[0.2em] text-stone-500 uppercase">Preferred narrator</p>
+							<p class="mt-2 text-sm text-stone-800">
+								{detail.request.manifestation.preferred_narrator ?? 'Any'}
+							</p>
 						</div>
 						<div class="rounded-[1.45rem] bg-stone-100/90 p-4">
-							<p class="text-xs uppercase tracking-[0.2em] text-stone-500">Preferred publisher</p>
-							<p class="mt-2 text-sm text-stone-800">{detail.request.manifestation.preferred_publisher ?? 'Any'}</p>
+							<p class="text-xs tracking-[0.2em] text-stone-500 uppercase">Preferred publisher</p>
+							<p class="mt-2 text-sm text-stone-800">
+								{detail.request.manifestation.preferred_publisher ?? 'Any'}
+							</p>
 						</div>
 						<div class="rounded-[1.45rem] bg-stone-100/90 p-4">
-							<p class="text-xs uppercase tracking-[0.2em] text-stone-500">Graphic audio</p>
+							<p class="text-xs tracking-[0.2em] text-stone-500 uppercase">Graphic audio</p>
 							<p class="mt-2 text-sm text-stone-800">
 								{detail.request.manifestation.graphic_audio ? 'Requested' : 'Not requested'}
 							</p>
@@ -393,7 +439,9 @@
 										<p class="font-semibold text-stone-900">{event.kind}</p>
 										<p class="mt-1 text-sm leading-6 text-stone-600">{eventSummary(event)}</p>
 									</div>
-									<div class="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-stone-400">
+									<div
+										class="flex items-center gap-2 text-xs tracking-[0.18em] text-stone-400 uppercase"
+									>
 										<Clock3 class="h-4 w-4" />
 										<span>{event.created_at}</span>
 									</div>

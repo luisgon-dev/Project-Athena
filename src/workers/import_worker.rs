@@ -5,8 +5,15 @@ use anyhow::{Context, Result, bail};
 
 use crate::{
     db::repositories::SqliteRequestRepository,
-    domain::{imports::ImportMediaType, requests::MediaType},
-    importer::{classify::classify_payload, move_plan::build_move_plan},
+    domain::{
+        imports::ImportMediaType,
+        requests::MediaType,
+        settings::{EbookImportMode, PersistedImportSettings},
+    },
+    importer::{
+        classify::classify_payload,
+        move_plan::{build_audiobook_root, build_ebook_move_plan, normalize_path_segment},
+    },
 };
 
 pub struct ImportWorker;
@@ -17,6 +24,7 @@ impl ImportWorker {
         request_id: &str,
         files: &[String],
         ebooks_root: &Path,
+        import_settings: &PersistedImportSettings,
     ) -> Result<PathBuf> {
         let request = repo
             .find_by_id(request_id)
@@ -45,7 +53,24 @@ impl ImportWorker {
             .map(|file_name| file_name.to_string_lossy().to_string())
             .context("ebook payload did not contain a supported file leaf")?;
 
-        let destination = build_move_plan(ebooks_root, &request.author, &request.title, &leaf_name);
+        let destination = match import_settings.ebook_import_mode {
+            EbookImportMode::Managed => build_ebook_move_plan(
+                ebooks_root,
+                &import_settings.ebook_naming_template,
+                &request.author,
+                &request.title,
+                &leaf_name,
+            ),
+            EbookImportMode::Passthrough => {
+                let passthrough_root = import_settings
+                    .ebook_passthrough_root
+                    .as_deref()
+                    .context("ebook passthrough root is not configured")?;
+                PathBuf::from(passthrough_root)
+                    .join(request_id)
+                    .join(normalize_path_segment(&leaf_name))
+            }
+        };
         move_file(&PathBuf::from(&source_file), &destination)?;
 
         repo.complete_download(request_id, files).await?;
@@ -59,6 +84,7 @@ impl ImportWorker {
         request_id: &str,
         files: &[String],
         audiobooks_root: &Path,
+        import_settings: &PersistedImportSettings,
     ) -> Result<PathBuf> {
         let request = repo
             .find_by_id(request_id)
@@ -75,9 +101,12 @@ impl ImportWorker {
         }
 
         let source_paths = files.iter().map(PathBuf::from).collect::<Vec<_>>();
-        let destination_dir = audiobooks_root
-            .join(sanitize_segment(&request.author))
-            .join(sanitize_segment(&request.title));
+        let destination_dir = build_audiobook_root(
+            audiobooks_root,
+            &import_settings.audiobook_layout_preset,
+            &request.author,
+            &request.title,
+        );
         let common_root = common_parent_dir(&source_paths)
             .context("audiobook payload did not have a common source root")?;
 
@@ -142,24 +171,5 @@ fn sanitize_relative_path(path: &Path) -> PathBuf {
 }
 
 fn sanitize_segment(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_control()
-                || matches!(
-                    character,
-                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
-                )
-            {
-                ' '
-            } else {
-                character
-            }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string()
+    normalize_path_segment(value)
 }

@@ -3,6 +3,24 @@ use ts_rs::TS;
 
 use crate::config::AppConfig;
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum EbookImportMode {
+    #[default]
+    Managed,
+    Passthrough,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AudiobookLayoutPreset {
+    #[default]
+    AuthorTitle,
+    Title,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct StorageSettingsRecord {
@@ -98,14 +116,20 @@ pub struct AudiobookshelfIntegrationUpdate {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ImportSettingsRecord {
-    pub naming_template: String,
+    pub ebook_import_mode: EbookImportMode,
+    pub ebook_passthrough_root: Option<String>,
+    pub ebook_naming_template: String,
+    pub audiobook_layout_preset: AudiobookLayoutPreset,
     pub calibre_command: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ImportSettingsUpdate {
-    pub naming_template: Option<String>,
+    pub ebook_import_mode: Option<EbookImportMode>,
+    pub ebook_passthrough_root: Option<String>,
+    pub ebook_naming_template: Option<String>,
+    pub audiobook_layout_preset: Option<AudiobookLayoutPreset>,
     pub calibre_command: Option<String>,
 }
 
@@ -224,7 +248,13 @@ pub struct PersistedAudiobookshelfIntegrationSettings {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersistedImportSettings {
-    pub naming_template: String,
+    #[serde(default)]
+    pub ebook_import_mode: EbookImportMode,
+    pub ebook_passthrough_root: Option<String>,
+    #[serde(default = "default_ebook_naming_template")]
+    pub ebook_naming_template: String,
+    #[serde(default)]
+    pub audiobook_layout_preset: AudiobookLayoutPreset,
     pub calibre_command: String,
 }
 
@@ -301,7 +331,10 @@ impl PersistedRuntimeSettings {
                 },
             },
             import: PersistedImportSettings {
-                naming_template: "{author}/{title}/{title}".to_string(),
+                ebook_import_mode: EbookImportMode::Managed,
+                ebook_passthrough_root: None,
+                ebook_naming_template: default_ebook_naming_template(),
+                audiobook_layout_preset: AudiobookLayoutPreset::AuthorTitle,
                 calibre_command: "calibredb".to_string(),
             },
             acquisition: PersistedAcquisitionSettings {
@@ -346,7 +379,10 @@ impl PersistedRuntimeSettings {
                 },
             },
             import: ImportSettingsRecord {
-                naming_template: self.import.naming_template.clone(),
+                ebook_import_mode: self.import.ebook_import_mode.clone(),
+                ebook_passthrough_root: self.import.ebook_passthrough_root.clone(),
+                ebook_naming_template: self.import.ebook_naming_template.clone(),
+                audiobook_layout_preset: self.import.audiobook_layout_preset.clone(),
                 calibre_command: self.import.calibre_command.clone(),
             },
             acquisition: AcquisitionSettingsRecord {
@@ -451,8 +487,17 @@ impl PersistedRuntimeSettings {
         }
 
         if let Some(import_settings) = update.import {
-            if let Some(value) = import_settings.naming_template {
-                self.import.naming_template = value;
+            if let Some(value) = import_settings.ebook_import_mode {
+                self.import.ebook_import_mode = value;
+            }
+            if let Some(value) = import_settings.ebook_passthrough_root {
+                self.import.ebook_passthrough_root = normalize_optional_text(Some(value));
+            }
+            if let Some(value) = import_settings.ebook_naming_template {
+                self.import.ebook_naming_template = value;
+            }
+            if let Some(value) = import_settings.audiobook_layout_preset {
+                self.import.audiobook_layout_preset = value;
             }
             if let Some(value) = import_settings.calibre_command {
                 self.import.calibre_command = value;
@@ -521,7 +566,22 @@ impl PersistedRuntimeSettings {
             }
         }
 
-        validate_naming_template(&self.import.naming_template)?;
+        match self.import.ebook_import_mode {
+            EbookImportMode::Managed => {
+                validate_naming_template(&self.import.ebook_naming_template)?;
+            }
+            EbookImportMode::Passthrough => {
+                let root = self
+                    .import
+                    .ebook_passthrough_root
+                    .as_deref()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("ebook passthrough root must be set in passthrough mode")
+                    })?;
+                validate_absolute_path(root, "ebook passthrough root")?;
+            }
+        }
+        require_non_empty(&self.import.calibre_command, "calibre command")?;
 
         if !(0.0..=1.0).contains(&self.acquisition.minimum_score) {
             anyhow::bail!("minimum score must be between 0.0 and 1.0");
@@ -583,4 +643,8 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn default_ebook_naming_template() -> String {
+    "{author}/{title}/{title}".to_string()
 }

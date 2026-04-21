@@ -13,7 +13,7 @@ use book_router::{
     },
     workers::search_worker::SearchWorker,
 };
-use wiremock::matchers::{body_string_contains, header, method, path};
+use wiremock::matchers::{body_string_contains, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
@@ -46,6 +46,8 @@ async fn search_worker_auto_acquires_high_confidence_candidates() {
     Mock::given(method("GET"))
         .and(path("/api/v1/search"))
         .and(header("X-Api-Key", "prowlarr-key"))
+        .and(query_param("query", "The Hobbit J.R.R. Tolkien"))
+        .and(query_param("type", "book"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             r#"[
                 {
@@ -128,7 +130,7 @@ async fn search_worker_queues_review_candidates_below_auto_threshold() {
             r#"[
                 {
                     "guid":"candidate-review",
-                    "title":"The Hobbit J.R.R. Tolkien",
+                    "title":"The Hobbit J.R.R. Tolkien narrated by Andy Serkis [ENG]",
                     "size":1234,
                     "protocol":"torrent",
                     "indexer":"Books",
@@ -181,5 +183,13 @@ async fn search_worker_queues_review_candidates_below_auto_threshold() {
     assert_eq!(
         review_queue[0].candidate.download_url.as_deref(),
         Some("magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&dn=The+Hobbit")
+    );
+    assert_eq!(
+        review_queue[0].candidate.narrator.as_deref(),
+        Some("Andy Serkis")
+    );
+    assert_eq!(
+        review_queue[0].candidate.detected_language.as_deref(),
+        Some("en")
     );
 }
