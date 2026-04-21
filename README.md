@@ -71,6 +71,51 @@ cd ..
 cargo run
 ```
 
+## Container image
+
+Athena builds into a single image that contains:
+
+- the compiled Rust backend
+- the built Svelte frontend
+- an entrypoint that supports Unraid-style `PUID` / `PGID` execution
+
+### Build locally
+
+```bash
+docker build -t project-athena:local .
+```
+
+### Run locally
+
+```bash
+docker run --rm -p 3001:3000 \
+  -e TZ=America/Los_Angeles \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  -v "$(pwd)/data:/config" \
+  -v "$(pwd)/media/ebooks:/ebooks" \
+  -v "$(pwd)/media/audiobooks:/audiobooks" \
+  project-athena:local
+```
+
+Container defaults:
+
+- `BIND_ADDR=0.0.0.0:3000`
+- `DATABASE_PATH=/config/book-router.sqlite`
+- `EBOOKS_ROOT=/ebooks`
+- `AUDIOBOOKS_ROOT=/audiobooks`
+- `UMASK=002`
+
+### GHCR publishing
+
+The workflow in [.github/workflows/publish-image.yml](.github/workflows/publish-image.yml) publishes the image to GitHub Container Registry on pushes to `main`, matching `v*` tags, and manual dispatches.
+
+Published image path:
+
+- `ghcr.io/<github-owner>/project-athena:latest`
+
+For Unraid-specific setup, see [docs/unraid.md](docs/unraid.md).
+
 ## Runtime configuration model
 
 Athena has two layers of configuration:
@@ -165,4 +210,3 @@ npm run build
 ### Request behavior does not match env vars after the first boot
 
 The persisted runtime settings may already be seeded in SQLite. Either update settings through the UI or start with a fresh database if you want bootstrap env vars to be applied again.
-

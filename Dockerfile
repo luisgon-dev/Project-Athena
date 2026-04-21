@@ -39,17 +39,23 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates gosu passwd tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/book_router /usr/local/bin/book_router
 COPY --from=frontend-builder /app/frontend/build /app/frontend/build
+COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-ENV BIND_ADDR=0.0.0.0:3000
-ENV EBOOKS_ROOT=/ebooks
-ENV AUDIOBOOKS_ROOT=/audiobooks
-ENV DATABASE_PATH=/data/book-router/book-router.sqlite
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
+
+ENV BIND_ADDR=0.0.0.0:3000 \
+    EBOOKS_ROOT=/ebooks \
+    AUDIOBOOKS_ROOT=/audiobooks \
+    DATABASE_PATH=/config/book-router.sqlite \
+    UMASK=002
 
 EXPOSE 3000
+VOLUME ["/config", "/ebooks", "/audiobooks"]
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["book_router"]

@@ -6,13 +6,16 @@ services:
         image: book-router:local
         container_name: book-router
         environment:
+            TZ: America/Los_Angeles
+            PUID: ${PUID:-1000}
+            PGID: ${PGID:-1000}
             EBOOKS_ROOT: /ebooks
             AUDIOBOOKS_ROOT: /audiobooks
-            DATABASE_PATH: /data/book-router/book-router.sqlite
+            DATABASE_PATH: /config/book-router.sqlite
         ports:
             - "3001:3000"
         volumes:
-            - ./data:/data/book-router
+            - ./data:/config
             - ./media/ebooks:/ebooks
             - ./media/audiobooks:/audiobooks
     qbittorrent:
@@ -20,8 +23,8 @@ services:
         container_name: book-router-qbittorrent
         profiles: ["acceptance"]
         environment:
-            PUID: 1000
-            PGID: 1000
+            PUID: ${PUID:-1000}
+            PGID: ${PGID:-1000}
             TZ: America/Los_Angeles
             WEBUI_PORT: 8080
         ports:
@@ -34,8 +37,8 @@ services:
         container_name: book-router-prowlarr
         profiles: ["acceptance"]
         environment:
-            PUID: 1000
-            PGID: 1000
+            PUID: ${PUID:-1000}
+            PGID: ${PGID:-1000}
             TZ: America/Los_Angeles
         ports:
             - "9696:9696"
