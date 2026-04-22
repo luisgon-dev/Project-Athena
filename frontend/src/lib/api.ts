@@ -1,3 +1,7 @@
+import type { AuthBootstrapStatus } from '$lib/types/AuthBootstrapStatus';
+import type { AuthUserRecord } from '$lib/types/AuthUserRecord';
+import type { CreateSubmissionRequest } from '$lib/types/CreateSubmissionRequest';
+import type { CreateUserRequest } from '$lib/types/CreateUserRequest';
 import type { CreateRequestSelection } from '$lib/types/CreateRequestSelection';
 import type { AcquisitionSettingsRecord } from '$lib/types/AcquisitionSettingsRecord';
 import type { AcquisitionSettingsUpdate } from '$lib/types/AcquisitionSettingsUpdate';
@@ -8,18 +12,28 @@ import type { LibraryScanJobRecord } from '$lib/types/LibraryScanJobRecord';
 import type { LibraryScanResponse } from '$lib/types/LibraryScanResponse';
 import type { ImportSettingsRecord } from '$lib/types/ImportSettingsRecord';
 import type { ImportSettingsUpdate } from '$lib/types/ImportSettingsUpdate';
+import type { LoginRequest } from '$lib/types/LoginRequest';
+import type { NotificationSettingsRecord } from '$lib/types/NotificationSettingsRecord';
+import type { NotificationSettingsUpdate } from '$lib/types/NotificationSettingsUpdate';
 import type { ProwlarrIntegrationRecord } from '$lib/types/ProwlarrIntegrationRecord';
 import type { ProwlarrIntegrationUpdate } from '$lib/types/ProwlarrIntegrationUpdate';
 import type { QbittorrentSettingsRecord } from '$lib/types/QbittorrentSettingsRecord';
 import type { QbittorrentSettingsUpdate } from '$lib/types/QbittorrentSettingsUpdate';
+import type { RequestSubmissionDetailRecord } from '$lib/types/RequestSubmissionDetailRecord';
+import type { RequestSubmissionRecord } from '$lib/types/RequestSubmissionRecord';
+import type { ResolveManualSubmissionRequest } from '$lib/types/ResolveManualSubmissionRequest';
 import type { RequestDetailRecord } from '$lib/types/RequestDetailRecord';
 import type { RequestListRecord } from '$lib/types/RequestListRecord';
 import type { RequestRecord } from '$lib/types/RequestRecord';
 import type { RuntimeSettingsRecord } from '$lib/types/RuntimeSettingsRecord';
 import type { RuntimeSettingsUpdate } from '$lib/types/RuntimeSettingsUpdate';
+import type { SetupRequest } from '$lib/types/SetupRequest';
 import type { StorageSettingsRecord } from '$lib/types/StorageSettingsRecord';
 import type { StorageSettingsUpdate } from '$lib/types/StorageSettingsUpdate';
+import type { SubmissionSearchResult } from '$lib/types/SubmissionSearchResult';
 import type { SyncedIndexerRecord } from '$lib/types/SyncedIndexerRecord';
+import type { UpdateUserRequest } from '$lib/types/UpdateUserRequest';
+import type { UserRecord } from '$lib/types/UserRecord';
 import type { WorkSearch } from '$lib/types/WorkSearch';
 
 const API_PREFIX = '/api/v1';
@@ -45,6 +59,10 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 		throw new Error(message);
 	}
 
+	if (response.status === 204) {
+		return undefined as T;
+	}
+
 	return (await response.json()) as T;
 }
 
@@ -58,6 +76,38 @@ function jsonRequest(path: string, method: string, body?: unknown): RequestInit 
 
 export function listRequests(): Promise<RequestListRecord[]> {
 	return requestJson<RequestListRecord[]>('/requests');
+}
+
+export function getAuthBootstrap(): Promise<AuthBootstrapStatus> {
+	return requestJson<AuthBootstrapStatus>('/auth/bootstrap');
+}
+
+export function setupAuth(payload: SetupRequest): Promise<AuthUserRecord> {
+	return requestJson<AuthUserRecord>('/auth/setup', jsonRequest('auth-setup', 'POST', payload));
+}
+
+export function login(payload: LoginRequest): Promise<AuthUserRecord> {
+	return requestJson<AuthUserRecord>('/auth/login', jsonRequest('auth-login', 'POST', payload));
+}
+
+export function logout(): Promise<void> {
+	return requestJson<void>('/auth/logout', { method: 'POST' });
+}
+
+export function getCurrentUser(): Promise<AuthUserRecord> {
+	return requestJson<AuthUserRecord>('/auth/me');
+}
+
+export function listUsers(): Promise<UserRecord[]> {
+	return requestJson<UserRecord[]>('/users');
+}
+
+export function createUser(payload: CreateUserRequest): Promise<UserRecord> {
+	return requestJson<UserRecord>('/users', jsonRequest('users-create', 'POST', payload));
+}
+
+export function updateUser(userId: string, payload: UpdateUserRequest): Promise<UserRecord> {
+	return requestJson<UserRecord>(`/users/${userId}`, jsonRequest('users-update', 'PUT', payload));
 }
 
 export function searchRequests(params: SearchParams): Promise<WorkSearch> {
@@ -83,6 +133,58 @@ export function createRequests(payload: CreateRequestSelection): Promise<Request
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(payload)
+	});
+}
+
+export function searchSubmissionCandidates(params: SearchParams): Promise<SubmissionSearchResult> {
+	const title = params.title?.trim() ?? '';
+	const author = params.author?.trim() ?? '';
+	if (!title && !author) {
+		return Promise.resolve({ works: [] });
+	}
+
+	const query = new URLSearchParams();
+	if (title) query.set('title', title);
+	if (author) query.set('author', author);
+	return requestJson<SubmissionSearchResult>(`/submissions/search?${query.toString()}`);
+}
+
+export function listSubmissions(all = false): Promise<RequestSubmissionRecord[]> {
+	return requestJson<RequestSubmissionRecord[]>(`/submissions${all ? '?all=true' : ''}`);
+}
+
+export function createSubmission(
+	payload: CreateSubmissionRequest
+): Promise<RequestSubmissionDetailRecord> {
+	return requestJson<RequestSubmissionDetailRecord>(
+		'/submissions',
+		jsonRequest('submissions-create', 'POST', payload)
+	);
+}
+
+export function getSubmissionDetail(submissionId: string): Promise<RequestSubmissionDetailRecord> {
+	return requestJson<RequestSubmissionDetailRecord>(`/submissions/${submissionId}`);
+}
+
+export function resolveSubmission(
+	submissionId: string,
+	payload: ResolveManualSubmissionRequest
+): Promise<RequestSubmissionDetailRecord> {
+	return requestJson<RequestSubmissionDetailRecord>(
+		`/submissions/${submissionId}/resolve`,
+		jsonRequest('submissions-resolve', 'POST', payload)
+	);
+}
+
+export function approveSubmission(submissionId: string): Promise<RequestSubmissionDetailRecord> {
+	return requestJson<RequestSubmissionDetailRecord>(`/submissions/${submissionId}/approve`, {
+		method: 'POST'
+	});
+}
+
+export function rejectSubmission(submissionId: string): Promise<RequestSubmissionDetailRecord> {
+	return requestJson<RequestSubmissionDetailRecord>(`/submissions/${submissionId}/reject`, {
+		method: 'POST'
 	});
 }
 
@@ -144,6 +246,19 @@ export function updateImportSettings(payload: ImportSettingsUpdate): Promise<Imp
 
 export function getAcquisitionSettings(): Promise<AcquisitionSettingsRecord> {
 	return requestJson<AcquisitionSettingsRecord>('/settings/acquisition');
+}
+
+export function getNotificationSettings(): Promise<NotificationSettingsRecord> {
+	return requestJson<NotificationSettingsRecord>('/settings/notifications');
+}
+
+export function updateNotificationSettings(
+	payload: NotificationSettingsUpdate
+): Promise<NotificationSettingsRecord> {
+	return requestJson<NotificationSettingsRecord>(
+		'/settings/notifications',
+		jsonRequest('notifications', 'PUT', payload)
+	);
 }
 
 export function updateAcquisitionSettings(

@@ -80,6 +80,9 @@ pub struct RequestRecord {
     pub media_type: MediaType,
     pub preferred_language: Option<String>,
     pub manifestation: ManifestationPreference,
+    pub submission_id: Option<String>,
+    pub requested_by_user_id: Option<String>,
+    pub requires_admin_approval: bool,
     pub state: String,
     pub created_at: String,
 }
@@ -98,6 +101,9 @@ impl RequestRecord {
             media_type,
             preferred_language: None,
             manifestation: ManifestationPreference::default(),
+            submission_id: None,
+            requested_by_user_id: None,
+            requires_admin_approval: false,
             state: "requested".to_string(),
             created_at: "1970-01-01T00:00:00Z".to_string(),
         }

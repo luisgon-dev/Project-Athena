@@ -6,18 +6,39 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::{app::AppState, http::error::AppError};
+use crate::{
+    app::AppState,
+    db::repositories::SqliteUserRepository,
+    http::{
+        auth::{current_user_from_headers, require_admin, session_id_from_headers},
+        error::AppError,
+    },
+};
 
-pub async fn get_system_status() -> Json<Value> {
-    Json(json!({
+pub async fn get_system_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let repo = SqliteUserRepository::new(state.pool.clone());
+    let status = repo
+        .bootstrap_status(session_id_from_headers(&headers).as_deref())
+        .await?;
+
+    Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "appName": "Project Athena",
         "instanceName": "Project Athena",
-        "authentication": "none"
-    }))
+        "authentication": "forms",
+        "setupRequired": status.setup_required,
+        "authenticatedUser": current_user_from_headers(&state, &headers).await?
+    })))
 }
 
-pub async fn get_indexers(State(state): State<AppState>) -> Result<Json<Vec<Value>>, AppError> {
+pub async fn get_indexers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Value>>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(state.settings.list_synced_indexer_resources().await?))
 }
 
@@ -27,8 +48,10 @@ pub async fn get_indexer_schema() -> Json<Vec<Value>> {
 
 pub async fn get_indexer(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<Value>, AppError> {
+    require_admin(&state, &headers).await?;
     let resource = state
         .settings
         .get_synced_indexer_resource(id)
@@ -40,9 +63,11 @@ pub async fn get_indexer(
 
 pub async fn post_indexer(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(_query): Query<ForceSaveQuery>,
     Json(payload): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), AppError> {
+    require_admin(&state, &headers).await?;
     validate_indexer_payload(&payload)?;
     let resource = state
         .settings
@@ -53,10 +78,12 @@ pub async fn post_indexer(
 
 pub async fn update_indexer(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Query(_query): Query<ForceSaveQuery>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, AppError> {
+    require_admin(&state, &headers).await?;
     validate_indexer_payload(&payload)?;
     let resource = state
         .settings
@@ -68,8 +95,10 @@ pub async fn update_indexer(
 
 pub async fn delete_indexer(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
+    require_admin(&state, &headers).await?;
     if !state.settings.delete_synced_indexer(id).await? {
         return Err(AppError::NotFound(format!(
             "Indexer with ID {id} not found"
@@ -80,10 +109,11 @@ pub async fn delete_indexer(
 }
 
 pub async fn test_indexer(
-    _state: State<AppState>,
-    _headers: HeaderMap,
+    state: State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<StatusCode, AppError> {
+    require_admin(&state, &headers).await?;
     validate_indexer_payload(&payload)?;
     Ok(StatusCode::OK)
 }

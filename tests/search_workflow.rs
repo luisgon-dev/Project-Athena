@@ -48,6 +48,7 @@ async fn search_worker_auto_acquires_high_confidence_candidates() {
         .and(header("X-Api-Key", "prowlarr-key"))
         .and(query_param("query", "The Hobbit J.R.R. Tolkien"))
         .and(query_param("type", "book"))
+        .and(query_param("indexerIds", "12"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             r#"[
                 {
@@ -82,6 +83,7 @@ async fn search_worker_auto_acquires_high_confidence_candidates() {
                     enabled: Some(true),
                     base_url: Some(prowlarr_server.uri()),
                     api_key: Some("prowlarr-key".to_string()),
+                    selected_indexer_ids: Some(vec![12]),
                     ..Default::default()
                 }),
                 ..Default::default()

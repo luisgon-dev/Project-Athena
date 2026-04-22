@@ -91,6 +91,7 @@ impl SearchWorker {
 
         if let Some((candidate, scored)) = qualified.first() {
             if scored.auto_acquire
+                && !request.requires_admin_approval
                 && candidate.download_url.is_some()
                 && settings.download_clients.qbittorrent.enabled
             {
@@ -149,18 +150,22 @@ impl SearchWorker {
         request: &RequestRecord,
         settings: &PersistedRuntimeSettings,
     ) -> Vec<ReleaseCandidate> {
-        let query = build_query(request, settings.acquisition.preferred_language.as_deref());
+        let query = build_query(request);
         let media_type = match request.media_type {
             MediaType::Ebook => "book",
             MediaType::Audiobook => "audio",
         };
         let mut results = Vec::new();
+        let selected_indexer_ids = settings.integrations.prowlarr.selected_indexer_ids.clone();
 
         if settings.integrations.prowlarr.enabled {
             let prowlarr = &settings.integrations.prowlarr;
             if let Some(api_key) = &prowlarr.api_key {
                 let client = ProwlarrClient::new(&prowlarr.base_url, api_key);
-                match client.search(&query, media_type).await {
+                match client
+                    .search(&query, media_type, &selected_indexer_ids)
+                    .await
+                {
                     Ok(candidates) => results.extend(candidates),
                     Err(error) => warn!(
                         error = %error,
@@ -177,6 +182,14 @@ impl SearchWorker {
         match settings_repo.list_search_indexers().await {
             Ok(indexers) => {
                 for indexer in indexers {
+                    if !selected_indexer_ids.is_empty()
+                        && indexer
+                            .prowlarr_indexer_id
+                            .and_then(|id| i32::try_from(id).ok())
+                            .is_none_or(|id| !selected_indexer_ids.contains(&id))
+                    {
+                        continue;
+                    }
                     if let Err(error) =
                         Self::search_direct_indexer(&mut results, request, &query, indexer).await
                     {
@@ -262,18 +275,12 @@ impl SearchWorker {
     }
 }
 
-fn build_query(request: &RequestRecord, default_language: Option<&str>) -> String {
-    let mut terms = vec![request.title.clone(), request.author.clone()];
-    if matches!(request.media_type, MediaType::Audiobook) {
-        terms.push("audiobook".to_string());
-        if let Some(narrator) = &request.manifestation.preferred_narrator {
-            terms.push(narrator.clone());
-        }
-    }
-
-    let _ = default_language;
-
-    terms.join(" ")
+fn build_query(request: &RequestRecord) -> String {
+    [request.title.trim(), request.author.trim()]
+        .into_iter()
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn contains_blocked_term(candidate: &ReleaseCandidate, blocked_terms: &[String]) -> bool {
@@ -329,7 +336,23 @@ mod tests {
         let request = RequestRecord::for_tests("The Hobbit", "J.R.R. Tolkien", MediaType::Ebook)
             .with_preferences(ManifestationPreference::default());
 
-        let query = build_query(&request, Some("en"));
+        let query = build_query(&request);
+
+        assert_eq!(query, "The Hobbit J.R.R. Tolkien");
+    }
+
+    #[test]
+    fn build_query_omits_audiobook_tokens_and_narrator() {
+        let request =
+            RequestRecord::for_tests("The Hobbit", "J.R.R. Tolkien", MediaType::Audiobook)
+                .with_preferences(ManifestationPreference {
+                    edition_title: None,
+                    preferred_narrator: Some("Andy Serkis".to_string()),
+                    preferred_publisher: None,
+                    graphic_audio: false,
+                });
+
+        let query = build_query(&request);
 
         assert_eq!(query, "The Hobbit J.R.R. Tolkien");
     }

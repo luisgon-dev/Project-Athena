@@ -11,6 +11,7 @@ use crate::{
     db::repositories::{SqliteRequestRepository, SqliteSettingsRepository},
     domain::{requests::MediaType, search::ReleaseCandidate, settings::PersistedImportSettings},
     downloads::qbittorrent::{QbittorrentClient, QbittorrentTorrent},
+    notifications::send_notification,
     sync::{audiobookshelf::AudiobookshelfClient, calibre::CalibreHook},
     workers::{import_worker::ImportWorker, sync_worker::SyncWorker},
 };
@@ -68,6 +69,7 @@ impl DownloadWorker {
 
     pub async fn poll_qbittorrent_once(
         repo: &SqliteRequestRepository,
+        settings_repo: &SqliteSettingsRepository,
         client: &QbittorrentClient,
         ebooks_root: &Path,
         audiobooks_root: &Path,
@@ -121,6 +123,18 @@ impl DownloadWorker {
                         calibre_hook,
                     )
                     .await?;
+                    let _ = send_notification(
+                        &settings_repo,
+                        "request_imported",
+                        "Athena import completed",
+                        &format!("Ebook import completed for {}", download.request_id),
+                        serde_json::json!({
+                            "request_id": download.request_id,
+                            "media_type": "ebook",
+                            "path": imported_path,
+                        }),
+                    )
+                    .await;
                     processed += 1;
                 }
                 MediaType::Audiobook => {
@@ -144,6 +158,18 @@ impl DownloadWorker {
                         library_id,
                     )
                     .await?;
+                    let _ = send_notification(
+                        &settings_repo,
+                        "request_imported",
+                        "Athena import completed",
+                        &format!("Audiobook import completed for {}", download.request_id),
+                        serde_json::json!({
+                            "request_id": download.request_id,
+                            "media_type": "audiobook",
+                            "path": imported_path,
+                        }),
+                    )
+                    .await;
                     processed += 1;
                 }
             }
@@ -185,6 +211,7 @@ impl DownloadWorker {
 
         Self::poll_qbittorrent_once(
             &SqliteRequestRepository::new(pool),
+            &settings_repo,
             &client,
             Path::new(&settings.storage.ebooks_root),
             Path::new(&settings.storage.audiobooks_root),

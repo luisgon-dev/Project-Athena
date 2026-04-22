@@ -4,6 +4,7 @@ import type { DownloadClientSettingsUpdate } from "./DownloadClientSettingsUpdat
 import type { ImportSettingsUpdate } from "./ImportSettingsUpdate";
 import type { IntegrationSettingsUpdate } from "./IntegrationSettingsUpdate";
 import type { MetadataSettingsUpdate } from "./MetadataSettingsUpdate";
+import type { NotificationSettingsUpdate } from "./NotificationSettingsUpdate";
 import type { StorageSettingsUpdate } from "./StorageSettingsUpdate";
 
-export type RuntimeSettingsUpdate = { storage: StorageSettingsUpdate | null, metadata: MetadataSettingsUpdate | null, download_clients: DownloadClientSettingsUpdate | null, integrations: IntegrationSettingsUpdate | null, import: ImportSettingsUpdate | null, acquisition: AcquisitionSettingsUpdate | null, };
+export type RuntimeSettingsUpdate = { storage: StorageSettingsUpdate | null, metadata: MetadataSettingsUpdate | null, download_clients: DownloadClientSettingsUpdate | null, integrations: IntegrationSettingsUpdate | null, import: ImportSettingsUpdate | null, acquisition: AcquisitionSettingsUpdate | null, notifications: NotificationSettingsUpdate | null, };

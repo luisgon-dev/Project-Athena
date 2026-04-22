@@ -1,17 +1,23 @@
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+};
 use std::path::Path;
 
 use crate::{
     app::AppState,
     db::repositories::SqliteRequestRepository,
     domain::library::{LibraryScanJobRecord, LibraryScanResponse},
-    http::error::AppError,
+    http::{auth::require_admin, error::AppError},
     library_scanner::LibraryScanner,
 };
 
 pub async fn trigger_scan(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<(StatusCode, Json<LibraryScanResponse>), AppError> {
+    require_admin(&state, &headers).await?;
     let settings = state
         .settings
         .get_persisted_runtime_settings()
@@ -61,7 +67,9 @@ pub async fn trigger_scan(
 
 pub async fn scan_status(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Option<LibraryScanJobRecord>>, AppError> {
+    require_admin(&state, &headers).await?;
     let repo = SqliteRequestRepository::new(state.pool);
     let job = repo.latest_scan_job().await?;
     Ok(Json(job))

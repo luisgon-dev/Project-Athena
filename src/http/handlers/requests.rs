@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
 };
 use serde::Deserialize;
 
@@ -15,7 +15,7 @@ use crate::{
             RequestListRecord,
         },
     },
-    http::error::AppError,
+    http::{auth::require_admin, error::AppError},
     workers::{download_worker::DownloadWorker, search_worker::SearchWorker},
 };
 
@@ -27,7 +27,9 @@ pub struct RequestSearchQuery {
 
 pub async fn requests_index(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<RequestListRecord>>, AppError> {
+    require_admin(&state, &headers).await?;
     let repo = SqliteRequestRepository::new(state.pool);
     let requests = repo.list().await?;
 
@@ -36,8 +38,10 @@ pub async fn requests_index(
 
 pub async fn search_requests(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(search): Query<RequestSearchQuery>,
 ) -> Result<Json<WorkSearch>, AppError> {
+    require_admin(&state, &headers).await?;
     let title = search.title.unwrap_or_default();
     let author = search.author.unwrap_or_default();
     let has_searched = !(title.trim().is_empty() && author.trim().is_empty());
@@ -56,6 +60,7 @@ pub async fn search_requests(
 
 pub async fn create_request(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<CreateRequestSelection>,
 ) -> Result<
     (
@@ -64,6 +69,7 @@ pub async fn create_request(
     ),
     AppError,
 > {
+    require_admin(&state, &headers).await?;
     let selected_work_id = normalize_optional_text(payload.selected_work_id)
         .ok_or_else(|| AppError::BadRequest("missing selected_work_id".to_string()))?;
 
@@ -100,16 +106,20 @@ pub async fn create_request(
 
 pub async fn show_request(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<RequestDetailRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     let repo = SqliteRequestRepository::new(state.pool);
     Ok(Json(load_request_detail(&repo, &id).await?))
 }
 
 pub async fn retry_request_search(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<RequestDetailRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     SearchWorker::process_request_by_id(state.pool.clone(), state.settings.clone(), &id).await?;
     let repo = SqliteRequestRepository::new(state.pool);
     Ok(Json(load_request_detail(&repo, &id).await?))
@@ -117,8 +127,10 @@ pub async fn retry_request_search(
 
 pub async fn approve_review_candidate(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((id, candidate_id)): Path<(String, i64)>,
 ) -> Result<Json<RequestDetailRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     let repo = SqliteRequestRepository::new(state.pool.clone());
     let candidate = repo
         .review_candidate_for_action(&id, candidate_id)
@@ -151,8 +163,10 @@ pub async fn approve_review_candidate(
 
 pub async fn reject_review_candidate(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((id, candidate_id)): Path<(String, i64)>,
 ) -> Result<Json<RequestDetailRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     let repo = SqliteRequestRepository::new(state.pool.clone());
     let candidate = repo
         .review_candidate_for_action(&id, candidate_id)

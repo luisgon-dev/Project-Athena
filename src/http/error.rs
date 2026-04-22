@@ -11,6 +11,8 @@ pub enum AppError {
     Database(sqlx::Error),
     NotFound(String),
     BadRequest(String),
+    Unauthorized(String),
+    Forbidden(String),
     Internal(anyhow::Error),
 }
 
@@ -34,6 +36,8 @@ impl IntoResponse for AppError {
             ),
             Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+            Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
+            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
             Self::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An internal error occurred".to_string(),

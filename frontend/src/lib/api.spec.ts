@@ -28,23 +28,21 @@ describe('api client', () => {
 	it('lists requests from the phase 2 JSON API', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi
-				.fn()
-				.mockResolvedValue(
-					new Response(
-						JSON.stringify([
-							{
-								id: 'req-1',
-								title: 'The Hobbit',
-								author: 'J.R.R. Tolkien',
-								media_type: 'Ebook',
-								state: 'requested',
-								created_at: '2026-04-10 00:00:00'
-							}
-						]),
-						{ status: 200, headers: { 'content-type': 'application/json' } }
-					)
+			vi.fn().mockResolvedValue(
+				new Response(
+					JSON.stringify([
+						{
+							id: 'req-1',
+							title: 'The Hobbit',
+							author: 'J.R.R. Tolkien',
+							media_type: 'Ebook',
+							state: 'requested',
+							created_at: '2026-04-10 00:00:00'
+						}
+					]),
+					{ status: 200, headers: { 'content-type': 'application/json' } }
 				)
+			)
 		);
 
 		const requests = await listRequests();
@@ -89,31 +87,29 @@ describe('api client', () => {
 	it('posts create payloads as JSON', async () => {
 		vi.stubGlobal(
 			'fetch',
-			vi
-				.fn()
-				.mockResolvedValue(
-					new Response(
-						JSON.stringify([
-							{
-								id: 'req-1',
-								external_work_id: 'OL27448W',
-								title: 'The Hobbit',
-								author: 'J.R.R. Tolkien',
-								media_type: 'Ebook',
-								preferred_language: 'en',
-								manifestation: {
-									edition_title: null,
-									preferred_narrator: null,
-									preferred_publisher: null,
-									graphic_audio: false
-								},
-								state: 'requested',
-								created_at: '2026-04-10 00:00:00'
-							}
-						]),
-						{ status: 201, headers: { 'content-type': 'application/json' } }
-					)
+			vi.fn().mockResolvedValue(
+				new Response(
+					JSON.stringify([
+						{
+							id: 'req-1',
+							external_work_id: 'OL27448W',
+							title: 'The Hobbit',
+							author: 'J.R.R. Tolkien',
+							media_type: 'Ebook',
+							preferred_language: 'en',
+							manifestation: {
+								edition_title: null,
+								preferred_narrator: null,
+								preferred_publisher: null,
+								graphic_audio: false
+							},
+							state: 'requested',
+							created_at: '2026-04-10 00:00:00'
+						}
+					]),
+					{ status: 201, headers: { 'content-type': 'application/json' } }
 				)
+			)
 		);
 
 		const payload: CreateRequestSelection = {
@@ -296,6 +292,7 @@ describe('api client', () => {
 			enabled: true,
 			sync_enabled: true,
 			base_url: 'http://localhost:9696',
+			selected_indexer_ids: [12, 42],
 			api_key: 'secret',
 			clear_api_key: false
 		});
@@ -307,6 +304,7 @@ describe('api client', () => {
 				enabled: true,
 				sync_enabled: true,
 				base_url: 'http://localhost:9696',
+				selected_indexer_ids: [12, 42],
 				api_key: 'secret',
 				clear_api_key: false
 			})
@@ -454,6 +452,7 @@ describe('api client', () => {
 			base_url: 'http://localhost:13378',
 			library_id: 'lib-1',
 			api_key: 'secret',
+			mark_existing_during_search: true,
 			clear_api_key: false
 		};
 

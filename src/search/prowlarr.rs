@@ -19,15 +19,25 @@ impl ProwlarrClient {
         }
     }
 
-    pub async fn search(&self, query: &str, media_type: &str) -> Result<Vec<ReleaseCandidate>> {
-        let response = self
+    pub async fn search(
+        &self,
+        query: &str,
+        media_type: &str,
+        indexer_ids: &[i32],
+    ) -> Result<Vec<ReleaseCandidate>> {
+        let mut request = self
             .http
             .get(format!("{}/api/v1/search", self.base_url))
             .header("X-Api-Key", &self.api_key)
-            .query(&[("query", query), ("type", media_type)])
-            .send()
-            .await?
-            .error_for_status()?;
+            .query(&[("query", query), ("type", media_type)]);
+
+        if !indexer_ids.is_empty() {
+            for indexer_id in indexer_ids {
+                request = request.query(&[("indexerIds", indexer_id)]);
+            }
+        }
+
+        let response = request.send().await?.error_for_status()?;
 
         let body = response.text().await?;
         if body.trim_start().starts_with('<') {

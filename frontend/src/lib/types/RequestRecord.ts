@@ -2,4 +2,4 @@
 import type { ManifestationPreference } from "./ManifestationPreference";
 import type { MediaType } from "./MediaType";
 
-export type RequestRecord = { id: string, external_work_id: string, title: string, author: string, media_type: MediaType, preferred_language: string | null, manifestation: ManifestationPreference, state: string, created_at: string, };
+export type RequestRecord = { id: string, external_work_id: string, title: string, author: string, media_type: MediaType, preferred_language: string | null, manifestation: ManifestationPreference, submission_id: string | null, requested_by_user_id: string | null, requires_admin_approval: boolean, state: string, created_at: string, };

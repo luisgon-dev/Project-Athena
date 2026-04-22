@@ -6,6 +6,7 @@
 		Headphones,
 		LayoutList,
 		Library,
+		Bell,
 		Rows3
 	} from 'lucide-svelte';
 
@@ -19,6 +20,7 @@
 		{ href: '/settings/storage', label: 'Storage', icon: Database },
 		{ href: '/settings/import', label: 'Import', icon: Library },
 		{ href: '/settings/acquisition', label: 'Acquisition', icon: Rows3 },
+		{ href: '/settings/notifications', label: 'Notifications', icon: Bell },
 		{ href: '/settings/synced-indexers', label: 'Synced Indexers', icon: Download }
 	];
 </script>

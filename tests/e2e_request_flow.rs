@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use book_router::{
     config::{AppConfig, DatabaseTarget},
-    db::{connect_sqlite, repositories::SqliteRequestRepository},
+    db::{connect_sqlite, repositories::{SqliteRequestRepository, SqliteSettingsRepository}},
     domain::{
         requests::{CreateRequest, ManifestationPreference, MediaType},
         search::ReleaseCandidate,
@@ -23,6 +23,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 async fn request_to_import_flow_records_success_events() {
     let pool = connect_sqlite(&DatabaseTarget::memory()).await.unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let _settings_repo = SqliteSettingsRepository::new(pool.clone());
     let repo = SqliteRequestRepository::new(pool);
     let tempdir = tempfile::tempdir().unwrap();
     let downloads_root = tempdir.path().join("downloads");
@@ -179,6 +180,7 @@ fn escape_shell_path(path: &Path) -> String {
 async fn ebook_request_dispatches_to_qbittorrent_and_completes_via_polling() {
     let pool = connect_sqlite(&DatabaseTarget::memory()).await.unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let settings_repo = SqliteSettingsRepository::new(pool.clone());
     let repo = SqliteRequestRepository::new(pool);
     let tempdir = tempfile::tempdir().unwrap();
     let downloads_root = tempdir.path().join("downloads");
@@ -275,6 +277,7 @@ async fn ebook_request_dispatches_to_qbittorrent_and_completes_via_polling() {
 
     let processed = DownloadWorker::poll_qbittorrent_once(
         &repo,
+        &settings_repo,
         &client,
         &ebooks_root,
         &tempdir.path().join("audiobooks"),
@@ -326,6 +329,7 @@ async fn ebook_request_dispatches_to_qbittorrent_and_completes_via_polling() {
 async fn audiobook_request_dispatches_imports_and_syncs_with_audiobookshelf() {
     let pool = connect_sqlite(&DatabaseTarget::memory()).await.unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let settings_repo = SqliteSettingsRepository::new(pool.clone());
     let repo = SqliteRequestRepository::new(pool);
     let tempdir = tempfile::tempdir().unwrap();
     let downloads_root = tempdir.path().join("downloads");
@@ -419,6 +423,7 @@ async fn audiobook_request_dispatches_imports_and_syncs_with_audiobookshelf() {
 
     let processed = DownloadWorker::poll_qbittorrent_once(
         &repo,
+        &settings_repo,
         &client,
         &ebooks_root,
         &audiobooks_root,

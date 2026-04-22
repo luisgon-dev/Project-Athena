@@ -14,6 +14,7 @@ use crate::{
     config::AppConfig,
     db::{connect_sqlite, repositories::SqliteSettingsRepository},
     http::handlers::{
+        auth::{auth_bootstrap, auth_login, auth_logout, auth_me, auth_setup, users_create, users_index, users_update},
         covers::openlibrary_cover,
         health::health,
         library::{scan_status, trigger_scan},
@@ -31,7 +32,12 @@ use crate::{
             get_storage_settings, list_synced_indexers, test_audiobookshelf_settings,
             test_prowlarr_settings, test_qbittorrent_settings, update_acquisition_settings,
             update_audiobookshelf_settings, update_import_settings, update_prowlarr_settings,
-            update_qbittorrent_settings, update_runtime_settings, update_storage_settings,
+            update_notifications_settings, update_qbittorrent_settings, update_runtime_settings, update_storage_settings,
+            get_notifications_settings,
+        },
+        submissions::{
+            approve_submission, create_submission, reject_submission, resolve_submission,
+            search_submissions, show_submission, submissions_index,
         },
     },
     metadata::openlibrary::OpenLibraryClient,
@@ -81,6 +87,13 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
     let state = AppState { pool, settings };
     let api_router = Router::new()
         .route("/health", get(health))
+        .route("/auth/bootstrap", get(auth_bootstrap))
+        .route("/auth/setup", axum::routing::post(auth_setup))
+        .route("/auth/login", axum::routing::post(auth_login))
+        .route("/auth/logout", axum::routing::post(auth_logout))
+        .route("/auth/me", get(auth_me))
+        .route("/users", get(users_index).post(users_create))
+        .route("/users/{id}", axum::routing::put(users_update))
         .route("/requests", get(requests_index).post(create_request))
         .route("/requests/search", get(search_requests))
         .route("/requests/{id}", get(show_request))
@@ -114,6 +127,10 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
             get(get_acquisition_settings).put(update_acquisition_settings),
         )
         .route(
+            "/settings/notifications",
+            get(get_notifications_settings).put(update_notifications_settings),
+        )
+        .route(
             "/settings/download-clients/qbittorrent",
             get(get_qbittorrent_settings).put(update_qbittorrent_settings),
         )
@@ -138,6 +155,21 @@ pub async fn build_app(config: AppConfig) -> anyhow::Result<Router> {
             axum::routing::post(test_audiobookshelf_settings),
         )
         .route("/settings/synced-indexers", get(list_synced_indexers))
+        .route("/submissions", get(submissions_index).post(create_submission))
+        .route("/submissions/search", get(search_submissions))
+        .route("/submissions/{id}", get(show_submission))
+        .route(
+            "/submissions/{id}/resolve",
+            axum::routing::post(resolve_submission),
+        )
+        .route(
+            "/submissions/{id}/approve",
+            axum::routing::post(approve_submission),
+        )
+        .route(
+            "/submissions/{id}/reject",
+            axum::routing::post(reject_submission),
+        )
         .route("/library/scan", axum::routing::post(trigger_scan))
         .route("/library/scan-status", get(scan_status))
         .route("/system/status", get(get_system_status))

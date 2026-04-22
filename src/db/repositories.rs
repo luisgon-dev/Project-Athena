@@ -5,11 +5,19 @@ use uuid::Uuid;
 
 use crate::config::AppConfig;
 use crate::domain::{
+    auth::{
+        AuthBootstrapStatus, AuthUserRecord, CreateUserRequest, LoginRequest, SessionRecord,
+        SetupRequest, UpdateUserRequest, UserRecord, UserRole,
+    },
     events::{RequestEventKind, RequestEventRecord},
     requests::{CreateRequest, RequestListRecord, RequestRecord},
     search::{ReleaseCandidate, ReviewQueueEntry, ScoredCandidate},
     settings::{
         PersistedRuntimeSettings, RuntimeSettingsRecord, RuntimeSettingsUpdate, SyncedIndexerRecord,
+    },
+    submissions::{
+        CreateSubmissionRequest, RequestSubmissionDetailRecord, RequestSubmissionRecord,
+        SubmissionEventRecord, SubmissionIntakeMode, SubmissionStatus,
     },
 };
 
@@ -22,6 +30,16 @@ pub struct SqliteSettingsRepository {
     pool: SqlitePool,
 }
 
+#[derive(Clone)]
+pub struct SqliteUserRepository {
+    pool: SqlitePool,
+}
+
+#[derive(Clone)]
+pub struct SqliteSubmissionRepository {
+    pool: SqlitePool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueuedDownloadRecord {
     pub request_id: String,
@@ -31,6 +49,7 @@ pub struct QueuedDownloadRecord {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchIndexerRecord {
     pub id: i64,
+    pub prowlarr_indexer_id: Option<i64>,
     pub implementation: String,
     pub protocol: Option<String>,
     pub base_url: String,
@@ -52,6 +71,16 @@ impl SqliteRequestRepository {
     }
 
     pub async fn create_batch(&self, requests: Vec<CreateRequest>) -> Result<Vec<RequestRecord>> {
+        self.create_batch_linked(requests, None, None, false).await
+    }
+
+    pub async fn create_batch_linked(
+        &self,
+        requests: Vec<CreateRequest>,
+        submission_id: Option<&str>,
+        requested_by_user_id: Option<&str>,
+        requires_admin_approval: bool,
+    ) -> Result<Vec<RequestRecord>> {
         if requests.is_empty() {
             return Ok(Vec::new());
         }
@@ -73,8 +102,20 @@ impl SqliteRequestRepository {
             let manifestation = request.manifestation.clone();
 
             sqlx::query(
-                "INSERT INTO requests (id, external_work_id, title, author, media_type, preferred_language, state, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                "INSERT INTO requests (
+                    id,
+                    external_work_id,
+                    title,
+                    author,
+                    media_type,
+                    preferred_language,
+                    submission_id,
+                    requested_by_user_id,
+                    requires_admin_approval,
+                    state,
+                    created_at
+                 )
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
             )
             .bind(&id)
             .bind(&external_work_id)
@@ -82,6 +123,9 @@ impl SqliteRequestRepository {
             .bind(&author)
             .bind(media_type)
             .bind(preferred_language.as_deref())
+            .bind(submission_id)
+            .bind(requested_by_user_id)
+            .bind(requires_admin_approval)
             .bind("requested")
             .execute(&mut *tx)
             .await?;
@@ -118,7 +162,7 @@ impl SqliteRequestRepository {
             .await?;
 
             let row = sqlx::query(
-                "SELECT id, external_work_id, title, author, media_type, preferred_language, state, created_at
+                "SELECT id, external_work_id, title, author, media_type, preferred_language, submission_id, requested_by_user_id, requires_admin_approval, state, created_at
                  FROM requests
                  WHERE id = ?",
             )
@@ -126,22 +170,7 @@ impl SqliteRequestRepository {
             .fetch_one(&mut *tx)
             .await?;
 
-            created.push(RequestRecord {
-                id: row.get::<String, _>("id"),
-                external_work_id: row.get::<String, _>("external_work_id"),
-                title: row.get::<String, _>("title"),
-                author: row.get::<String, _>("author"),
-                media_type: match crate::domain::requests::MediaType::from_str(
-                    row.get::<String, _>("media_type").as_str(),
-                ) {
-                    Some(media_type) => media_type,
-                    None => anyhow::bail!("unknown media type stored in requests"),
-                },
-                preferred_language: row.get::<Option<String>, _>("preferred_language"),
-                manifestation,
-                state: row.get::<String, _>("state"),
-                created_at: row.get::<String, _>("created_at"),
-            });
+            created.push(row_to_request(row, manifestation)?);
         }
 
         tx.commit().await?;
@@ -151,7 +180,7 @@ impl SqliteRequestRepository {
 
     pub async fn find_by_id(&self, request_id: impl AsRef<str>) -> Result<Option<RequestRecord>> {
         let row = sqlx::query(
-            "SELECT id, external_work_id, title, author, media_type, preferred_language, state, created_at
+            "SELECT id, external_work_id, title, author, media_type, preferred_language, submission_id, requested_by_user_id, requires_admin_approval, state, created_at
              FROM requests
              WHERE id = ?",
         )
@@ -174,22 +203,7 @@ impl SqliteRequestRepository {
         let payload: serde_json::Value = serde_json::from_str(&payload_json)?;
         let manifestation = manifestation_from_payload(&payload);
 
-        Ok(Some(RequestRecord {
-            id: row.get::<String, _>("id"),
-            external_work_id: row.get::<String, _>("external_work_id"),
-            title: row.get::<String, _>("title"),
-            author: row.get::<String, _>("author"),
-            media_type: match crate::domain::requests::MediaType::from_str(
-                row.get::<String, _>("media_type").as_str(),
-            ) {
-                Some(media_type) => media_type,
-                None => anyhow::bail!("unknown media type stored in requests"),
-            },
-            preferred_language: row.get::<Option<String>, _>("preferred_language"),
-            manifestation,
-            state: row.get::<String, _>("state"),
-            created_at: row.get::<String, _>("created_at"),
-        }))
+        Ok(Some(row_to_request(row, manifestation)?))
     }
 
     pub async fn events_for(&self, request_id: impl AsRef<str>) -> Result<Vec<RequestEventRecord>> {
@@ -682,7 +696,7 @@ impl SqliteRequestRepository {
         media_type: &str,
     ) -> Result<Option<RequestRecord>> {
         let row = sqlx::query(
-            "SELECT id, external_work_id, title, author, media_type, preferred_language, state, created_at
+            "SELECT id, external_work_id, title, author, media_type, preferred_language, submission_id, requested_by_user_id, requires_admin_approval, state, created_at
              FROM requests
              WHERE imported_path = ? AND media_type = ?",
         )
@@ -707,22 +721,7 @@ impl SqliteRequestRepository {
         let payload: serde_json::Value = serde_json::from_str(&payload_json)?;
         let manifestation = manifestation_from_payload(&payload);
 
-        Ok(Some(RequestRecord {
-            id: request_id,
-            external_work_id: row.get::<String, _>("external_work_id"),
-            title: row.get::<String, _>("title"),
-            author: row.get::<String, _>("author"),
-            media_type: match crate::domain::requests::MediaType::from_str(
-                row.get::<String, _>("media_type").as_str(),
-            ) {
-                Some(media_type) => media_type,
-                None => anyhow::bail!("unknown media type stored in requests"),
-            },
-            preferred_language: row.get::<Option<String>, _>("preferred_language"),
-            manifestation,
-            state: row.get::<String, _>("state"),
-            created_at: row.get::<String, _>("created_at"),
-        }))
+        Ok(Some(row_to_request(row, manifestation)?))
     }
 
     pub async fn find_request_by_title_author(
@@ -732,7 +731,7 @@ impl SqliteRequestRepository {
         media_type: &str,
     ) -> Result<Option<RequestRecord>> {
         let row = sqlx::query(
-            "SELECT id, external_work_id, title, author, media_type, preferred_language, state, created_at
+            "SELECT id, external_work_id, title, author, media_type, preferred_language, submission_id, requested_by_user_id, requires_admin_approval, state, created_at
              FROM requests
              WHERE title = ? AND author = ? AND media_type = ?",
         )
@@ -758,22 +757,102 @@ impl SqliteRequestRepository {
         let payload: serde_json::Value = serde_json::from_str(&payload_json)?;
         let manifestation = manifestation_from_payload(&payload);
 
-        Ok(Some(RequestRecord {
-            id: request_id,
-            external_work_id: row.get::<String, _>("external_work_id"),
-            title: row.get::<String, _>("title"),
-            author: row.get::<String, _>("author"),
-            media_type: match crate::domain::requests::MediaType::from_str(
-                row.get::<String, _>("media_type").as_str(),
-            ) {
-                Some(media_type) => media_type,
-                None => anyhow::bail!("unknown media type stored in requests"),
-            },
-            preferred_language: row.get::<Option<String>, _>("preferred_language"),
-            manifestation,
-            state: row.get::<String, _>("state"),
-            created_at: row.get::<String, _>("created_at"),
-        }))
+        Ok(Some(row_to_request(row, manifestation)?))
+    }
+
+    pub async fn list_requests_by_title_author(
+        &self,
+        title: &str,
+        author: &str,
+    ) -> Result<Vec<RequestRecord>> {
+        let rows = sqlx::query(
+            "SELECT id
+             FROM requests
+             WHERE lower(title) = lower(?) AND lower(author) = lower(?)
+             ORDER BY datetime(created_at) DESC, id DESC",
+        )
+        .bind(title)
+        .bind(author)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut records = Vec::with_capacity(rows.len());
+        for row in rows {
+            let request_id = row.get::<String, _>("id");
+            if let Some(record) = self.find_by_id(&request_id).await? {
+                records.push(record);
+            }
+        }
+        Ok(records)
+    }
+
+    pub async fn linked_requests_for_submission(
+        &self,
+        submission_id: &str,
+    ) -> Result<Vec<RequestListRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, title, author, media_type, state, created_at
+             FROM requests
+             WHERE submission_id = ?
+             ORDER BY datetime(created_at) DESC, id DESC",
+        )
+        .bind(submission_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(RequestListRecord {
+                    id: row.get::<String, _>("id"),
+                    title: row.get::<String, _>("title"),
+                    author: row.get::<String, _>("author"),
+                    media_type: match crate::domain::requests::MediaType::from_str(
+                        row.get::<String, _>("media_type").as_str(),
+                    ) {
+                        Some(media_type) => media_type,
+                        None => anyhow::bail!("unknown media type stored in requests"),
+                    },
+                    state: row.get::<String, _>("state"),
+                    created_at: row.get::<String, _>("created_at"),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn set_submission_approval(
+        &self,
+        submission_id: &str,
+        requires_admin_approval: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE requests
+             SET requires_admin_approval = ?
+             WHERE submission_id = ?",
+        )
+        .bind(requires_admin_approval)
+        .bind(submission_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn set_submission_request_state(
+        &self,
+        submission_id: &str,
+        state: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE requests
+             SET state = ?
+             WHERE submission_id = ?",
+        )
+        .bind(state)
+        .bind(submission_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn create_library_discovered_request(
@@ -996,6 +1075,7 @@ impl SqliteSettingsRepository {
         let rows = sqlx::query(
             "SELECT
                 id,
+                prowlarr_indexer_id,
                 implementation,
                 protocol,
                 base_url,
@@ -1013,6 +1093,7 @@ impl SqliteSettingsRepository {
             .into_iter()
             .map(|row| SearchIndexerRecord {
                 id: row.get::<i64, _>("id"),
+                prowlarr_indexer_id: row.get::<Option<i64>, _>("prowlarr_indexer_id"),
                 implementation: row.get::<String, _>("implementation"),
                 protocol: row.get::<Option<String>, _>("protocol"),
                 base_url: row.get::<String, _>("base_url"),
@@ -1162,6 +1243,466 @@ impl SqliteSettingsRepository {
     }
 }
 
+impl SqliteUserRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn bootstrap_status(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<AuthBootstrapStatus> {
+        let setup_required = self.setup_required().await?;
+        let authenticated_user = if let Some(session_id) = session_id {
+            self.find_user_by_session(session_id).await?
+        } else {
+            None
+        };
+
+        Ok(AuthBootstrapStatus {
+            setup_required,
+            authenticated_user,
+        })
+    }
+
+    pub async fn setup_required(&self) -> Result<bool> {
+        let row = sqlx::query("SELECT COUNT(*) AS count FROM users")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.get::<i64, _>("count") == 0)
+    }
+
+    pub async fn create_initial_admin(&self, payload: SetupRequest) -> Result<UserRecord> {
+        if !self.setup_required().await? {
+            anyhow::bail!("initial setup has already been completed");
+        }
+        self.create_user(CreateUserRequest {
+            username: payload.username,
+            password: payload.password,
+            role: UserRole::Admin,
+        })
+        .await
+    }
+
+    pub async fn create_user(&self, payload: CreateUserRequest) -> Result<UserRecord> {
+        let username = normalize_required_text(&payload.username, "username")?;
+        let password = normalize_required_text(&payload.password, "password")?;
+        validate_password(&password)?;
+
+        let id = Uuid::new_v4().to_string();
+        let password_hash = hash_password(&password)?;
+
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash, role, disabled, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        )
+        .bind(&id)
+        .bind(&username)
+        .bind(password_hash)
+        .bind(payload.role.as_db())
+        .execute(&self.pool)
+        .await?;
+
+        self.find_by_id(&id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("newly created user disappeared"))
+    }
+
+    pub async fn list(&self) -> Result<Vec<UserRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, username, role, disabled, created_at
+             FROM users
+             ORDER BY lower(username) ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(row_to_user_record).collect()
+    }
+
+    pub async fn find_by_id(&self, user_id: &str) -> Result<Option<UserRecord>> {
+        let row = sqlx::query(
+            "SELECT id, username, role, disabled, created_at
+             FROM users
+             WHERE id = ?",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(row_to_user_record).transpose()
+    }
+
+    pub async fn update_user(
+        &self,
+        user_id: &str,
+        payload: UpdateUserRequest,
+    ) -> Result<Option<UserRecord>> {
+        let password_hash = match payload.password {
+            Some(password) => {
+                let normalized = normalize_required_text(&password, "password")?;
+                validate_password(&normalized)?;
+                Some(hash_password(&normalized)?)
+            }
+            None => None,
+        };
+
+        let role = payload.role.map(|role| role.as_db().to_string());
+
+        let result = sqlx::query(
+            "UPDATE users
+             SET role = COALESCE(?, role),
+                 disabled = COALESCE(?, disabled),
+                 password_hash = COALESCE(?, password_hash),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?",
+        )
+        .bind(role.as_deref())
+        .bind(payload.disabled)
+        .bind(password_hash.as_deref())
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+
+        self.find_by_id(user_id).await
+    }
+
+    pub async fn verify_login(&self, payload: LoginRequest) -> Result<Option<AuthUserRecord>> {
+        let username = normalize_required_text(&payload.username, "username")?;
+        let row = sqlx::query(
+            "SELECT id, username, password_hash, role, disabled
+             FROM users
+             WHERE username = ?",
+        )
+        .bind(&username)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        if row.get::<bool, _>("disabled") {
+            anyhow::bail!("user account is disabled");
+        }
+
+        if !verify_password(&row.get::<String, _>("password_hash"), &payload.password)? {
+            return Ok(None);
+        }
+
+        Ok(Some(AuthUserRecord {
+            id: row.get::<String, _>("id"),
+            username: row.get::<String, _>("username"),
+            role: row_to_user_role(&row)?,
+        }))
+    }
+
+    pub async fn create_session(&self, user_id: &str, ttl_secs: i64) -> Result<SessionRecord> {
+        let id = Uuid::new_v4().to_string();
+        let expires_at = current_unix_seconds() + ttl_secs;
+
+        sqlx::query(
+            "INSERT INTO sessions (id, user_id, expires_at, created_at)
+             VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+        )
+        .bind(&id)
+        .bind(user_id)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(SessionRecord {
+            id,
+            user_id: user_id.to_string(),
+            expires_at,
+        })
+    }
+
+    pub async fn delete_session(&self, session_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM sessions WHERE id = ?")
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn find_user_by_session(&self, session_id: &str) -> Result<Option<AuthUserRecord>> {
+        sqlx::query("DELETE FROM sessions WHERE expires_at <= ?")
+            .bind(current_unix_seconds())
+            .execute(&self.pool)
+            .await?;
+
+        let row = sqlx::query(
+            "SELECT u.id, u.username, u.role, u.disabled
+             FROM sessions s
+             JOIN users u ON u.id = s.user_id
+             WHERE s.id = ? AND s.expires_at > ?",
+        )
+        .bind(session_id)
+        .bind(current_unix_seconds())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        if row.get::<bool, _>("disabled") {
+            return Ok(None);
+        }
+
+        Ok(Some(AuthUserRecord {
+            id: row.get::<String, _>("id"),
+            username: row.get::<String, _>("username"),
+            role: row_to_user_role(&row)?,
+        }))
+    }
+}
+
+impl SqliteSubmissionRepository {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn create_submission(
+        &self,
+        requested_by: &AuthUserRecord,
+        payload: &CreateSubmissionRequest,
+        title: &str,
+        author: &str,
+        external_work_id: Option<&str>,
+        status: SubmissionStatus,
+        requires_admin_approval: bool,
+    ) -> Result<RequestSubmissionRecord> {
+        let id = Uuid::new_v4().to_string();
+        let intake_mode = payload.intake_mode.clone().unwrap_or_default();
+
+        sqlx::query(
+            "INSERT INTO request_submissions (
+                id,
+                requested_by_user_id,
+                intake_mode,
+                title,
+                author,
+                external_work_id,
+                notes,
+                media_types_json,
+                preferred_language,
+                manifestation_json,
+                status,
+                requires_admin_approval,
+                allow_duplicate,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        )
+        .bind(&id)
+        .bind(&requested_by.id)
+        .bind(intake_mode.as_db())
+        .bind(title)
+        .bind(author)
+        .bind(external_work_id)
+        .bind(normalize_optional_text(payload.notes.clone()))
+        .bind(serde_json::to_string(&payload.media_types)?)
+        .bind(normalize_optional_text(payload.preferred_language.clone()))
+        .bind(serde_json::to_string(&payload.manifestation)?)
+        .bind(status.as_db())
+        .bind(requires_admin_approval)
+        .bind(payload.allow_duplicate)
+        .execute(&self.pool)
+        .await?;
+
+        self.append_event(
+            &id,
+            "created",
+            json!({
+                "requested_by_user_id": requested_by.id,
+                "intake_mode": intake_mode.as_db(),
+                "title": title,
+                "author": author,
+                "external_work_id": external_work_id,
+                "requires_admin_approval": requires_admin_approval,
+            }),
+        )
+        .await?;
+
+        self.find_by_id(&id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("newly created submission disappeared"))
+    }
+
+    pub async fn list_for_user(
+        &self,
+        viewer: &AuthUserRecord,
+        include_all: bool,
+    ) -> Result<Vec<RequestSubmissionRecord>> {
+        let rows = if include_all && viewer.role.is_admin() {
+            sqlx::query(
+                "SELECT s.id
+                 FROM request_submissions s
+                 ORDER BY datetime(s.created_at) DESC, s.id DESC",
+            )
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT s.id
+                 FROM request_submissions s
+                 WHERE s.requested_by_user_id = ?
+                 ORDER BY datetime(s.created_at) DESC, s.id DESC",
+            )
+            .bind(&viewer.id)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        let mut submissions = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id = row.get::<String, _>("id");
+            if let Some(submission) = self.find_by_id(&id).await? {
+                submissions.push(submission);
+            }
+        }
+        Ok(submissions)
+    }
+
+    pub async fn find_by_id(&self, submission_id: &str) -> Result<Option<RequestSubmissionRecord>> {
+        let row = sqlx::query(
+            "SELECT
+                s.id,
+                s.requested_by_user_id,
+                u.username AS requested_by_username,
+                s.intake_mode,
+                s.title,
+                s.author,
+                s.external_work_id,
+                s.notes,
+                s.media_types_json,
+                s.preferred_language,
+                s.manifestation_json,
+                s.status,
+                s.requires_admin_approval,
+                s.allow_duplicate,
+                s.created_at,
+                s.updated_at
+             FROM request_submissions s
+             JOIN users u ON u.id = s.requested_by_user_id
+             WHERE s.id = ?",
+        )
+        .bind(submission_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match row {
+            Some(row) => Ok(Some(row_to_submission_record(&self.pool, row).await?)),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn events_for(&self, submission_id: &str) -> Result<Vec<SubmissionEventRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, submission_id, kind, payload_json, created_at
+             FROM submission_events
+             WHERE submission_id = ?
+             ORDER BY id ASC",
+        )
+        .bind(submission_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| SubmissionEventRecord {
+                id: row.get::<i64, _>("id"),
+                submission_id: row.get::<String, _>("submission_id"),
+                kind: row.get::<String, _>("kind"),
+                payload_json: row.get::<String, _>("payload_json"),
+                created_at: row.get::<String, _>("created_at"),
+            })
+            .collect())
+    }
+
+    pub async fn detail_for(
+        &self,
+        submission_id: &str,
+    ) -> Result<Option<RequestSubmissionDetailRecord>> {
+        let Some(submission) = self.find_by_id(submission_id).await? else {
+            return Ok(None);
+        };
+        let events = self.events_for(submission_id).await?;
+        Ok(Some(RequestSubmissionDetailRecord { submission, events }))
+    }
+
+    pub async fn update_status(&self, submission_id: &str, status: SubmissionStatus) -> Result<()> {
+        sqlx::query(
+            "UPDATE request_submissions
+             SET status = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?",
+        )
+        .bind(status.as_db())
+        .bind(submission_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn append_event(
+        &self,
+        submission_id: &str,
+        kind: &str,
+        payload: Value,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO submission_events (submission_id, kind, payload_json, created_at)
+             VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+        )
+        .bind(submission_id)
+        .bind(kind)
+        .bind(payload.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn resolve_metadata(
+        &self,
+        submission_id: &str,
+        external_work_id: &str,
+        title: &str,
+        author: &str,
+        status: SubmissionStatus,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE request_submissions
+             SET external_work_id = ?,
+                 title = ?,
+                 author = ?,
+                 status = ?,
+                 resolution_json = ?,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?",
+        )
+        .bind(external_work_id)
+        .bind(title)
+        .bind(author)
+        .bind(status.as_db())
+        .bind(json!({
+            "external_work_id": external_work_id,
+            "title": title,
+            "author": author,
+        })
+        .to_string())
+        .bind(submission_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}
+
 fn manifestation_from_payload(
     payload: &serde_json::Value,
 ) -> crate::domain::requests::ManifestationPreference {
@@ -1184,6 +1725,166 @@ fn manifestation_from_payload(
             .and_then(|value| value.as_bool())
             .unwrap_or(false),
     }
+}
+
+fn row_to_request(
+    row: sqlx::sqlite::SqliteRow,
+    manifestation: crate::domain::requests::ManifestationPreference,
+) -> Result<RequestRecord> {
+    Ok(RequestRecord {
+        id: row.get::<String, _>("id"),
+        external_work_id: row.get::<String, _>("external_work_id"),
+        title: row.get::<String, _>("title"),
+        author: row.get::<String, _>("author"),
+        media_type: match crate::domain::requests::MediaType::from_str(
+            row.get::<String, _>("media_type").as_str(),
+        ) {
+            Some(media_type) => media_type,
+            None => anyhow::bail!("unknown media type stored in requests"),
+        },
+        preferred_language: row.get::<Option<String>, _>("preferred_language"),
+        manifestation,
+        submission_id: row.get::<Option<String>, _>("submission_id"),
+        requested_by_user_id: row.get::<Option<String>, _>("requested_by_user_id"),
+        requires_admin_approval: row.get::<bool, _>("requires_admin_approval"),
+        state: row.get::<String, _>("state"),
+        created_at: row.get::<String, _>("created_at"),
+    })
+}
+
+fn row_to_user_role(row: &sqlx::sqlite::SqliteRow) -> Result<UserRole> {
+    UserRole::from_db(row.get::<String, _>("role").as_str())
+        .ok_or_else(|| anyhow::anyhow!("unknown user role stored in users"))
+}
+
+fn row_to_user_record(row: sqlx::sqlite::SqliteRow) -> Result<UserRecord> {
+    Ok(UserRecord {
+        id: row.get::<String, _>("id"),
+        username: row.get::<String, _>("username"),
+        role: row_to_user_role(&row)?,
+        disabled: row.get::<bool, _>("disabled"),
+        created_at: row.get::<String, _>("created_at"),
+    })
+}
+
+async fn row_to_submission_record(
+    pool: &SqlitePool,
+    row: sqlx::sqlite::SqliteRow,
+) -> Result<RequestSubmissionRecord> {
+    let submission_id = row.get::<String, _>("id");
+    let media_types =
+        serde_json::from_str::<Vec<crate::domain::requests::MediaType>>(
+            row.get::<String, _>("media_types_json").as_str(),
+        )?;
+    let manifestation =
+        serde_json::from_str::<crate::domain::requests::ManifestationPreference>(
+            row.get::<String, _>("manifestation_json").as_str(),
+        )?;
+    let linked_rows = sqlx::query(
+        "SELECT id, title, author, media_type, state, created_at
+         FROM requests
+         WHERE submission_id = ?
+         ORDER BY datetime(created_at) DESC, id DESC",
+    )
+    .bind(&submission_id)
+    .fetch_all(pool)
+    .await?;
+    let linked_requests = linked_rows
+        .into_iter()
+        .map(|linked| {
+            Ok(RequestListRecord {
+                id: linked.get::<String, _>("id"),
+                title: linked.get::<String, _>("title"),
+                author: linked.get::<String, _>("author"),
+                media_type: crate::domain::requests::MediaType::from_str(
+                    linked.get::<String, _>("media_type").as_str(),
+                )
+                .ok_or_else(|| anyhow::anyhow!("unknown media type stored in requests"))?,
+                state: linked.get::<String, _>("state"),
+                created_at: linked.get::<String, _>("created_at"),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(RequestSubmissionRecord {
+        id: submission_id,
+        requested_by_user_id: row.get::<String, _>("requested_by_user_id"),
+        requested_by_username: row.get::<String, _>("requested_by_username"),
+        intake_mode: SubmissionIntakeMode::from_db(row.get::<String, _>("intake_mode").as_str())
+            .ok_or_else(|| anyhow::anyhow!("unknown submission intake mode"))?,
+        title: row.get::<String, _>("title"),
+        author: row.get::<String, _>("author"),
+        external_work_id: row.get::<Option<String>, _>("external_work_id"),
+        notes: row.get::<Option<String>, _>("notes"),
+        media_types,
+        preferred_language: row.get::<Option<String>, _>("preferred_language"),
+        manifestation,
+        status: SubmissionStatus::from_db(row.get::<String, _>("status").as_str())
+            .ok_or_else(|| anyhow::anyhow!("unknown submission status"))?,
+        requires_admin_approval: row.get::<bool, _>("requires_admin_approval"),
+        allow_duplicate: row.get::<bool, _>("allow_duplicate"),
+        linked_requests,
+        created_at: row.get::<String, _>("created_at"),
+        updated_at: row.get::<String, _>("updated_at"),
+    })
+}
+
+fn current_unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default()
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn normalize_required_text(value: &str, label: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("{label} must not be empty");
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_password(password: &str) -> Result<()> {
+    if password.len() < 8 {
+        anyhow::bail!("password must be at least 8 characters");
+    }
+    Ok(())
+}
+
+fn hash_password(password: &str) -> Result<String> {
+    use argon2::{
+        password_hash::SaltString,
+        Argon2, PasswordHasher,
+    };
+    use rand::rngs::OsRng;
+
+    Ok(Argon2::default()
+        .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+        .map_err(anyhow::Error::msg)?
+        .to_string())
+}
+
+fn verify_password(password_hash: &str, password: &str) -> Result<bool> {
+    use argon2::{
+        password_hash::{PasswordHash, PasswordVerifier},
+        Argon2,
+    };
+
+    let parsed = PasswordHash::new(password_hash).map_err(anyhow::Error::msg)?;
+    Ok(Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_ok())
 }
 
 fn row_to_synced_indexer_record(row: sqlx::sqlite::SqliteRow) -> Result<SyncedIndexerRecord> {

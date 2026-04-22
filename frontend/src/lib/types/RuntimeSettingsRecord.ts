@@ -4,6 +4,7 @@ import type { DownloadClientSettingsRecord } from "./DownloadClientSettingsRecor
 import type { ImportSettingsRecord } from "./ImportSettingsRecord";
 import type { IntegrationSettingsRecord } from "./IntegrationSettingsRecord";
 import type { MetadataSettingsRecord } from "./MetadataSettingsRecord";
+import type { NotificationSettingsRecord } from "./NotificationSettingsRecord";
 import type { StorageSettingsRecord } from "./StorageSettingsRecord";
 
-export type RuntimeSettingsRecord = { storage: StorageSettingsRecord, metadata: MetadataSettingsRecord, download_clients: DownloadClientSettingsRecord, integrations: IntegrationSettingsRecord, import: ImportSettingsRecord, acquisition: AcquisitionSettingsRecord, };
+export type RuntimeSettingsRecord = { storage: StorageSettingsRecord, metadata: MetadataSettingsRecord, download_clients: DownloadClientSettingsRecord, integrations: IntegrationSettingsRecord, import: ImportSettingsRecord, acquisition: AcquisitionSettingsRecord, notifications: NotificationSettingsRecord, };

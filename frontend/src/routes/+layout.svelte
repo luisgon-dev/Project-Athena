@@ -1,9 +1,47 @@
 <script lang="ts">
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
-	import { Compass, LibraryBig, Radar, ScanLine, SlidersHorizontal } from 'lucide-svelte';
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import {
+		Compass,
+		LibraryBig,
+		LogOut,
+		Radar,
+		ScanLine,
+		Shield,
+		SlidersHorizontal,
+		Users
+	} from 'lucide-svelte';
+	import { authState, logoutAndReset, refreshAuth } from '$lib/auth';
 
 	let { children } = $props();
+
+	async function syncAuth() {
+		try {
+			const state = await refreshAuth();
+			const pathname = page.url.pathname;
+			if (state.setupRequired && pathname !== '/setup') {
+				await goto('/setup');
+				return;
+			}
+			if (!state.setupRequired && !state.user && pathname !== '/login') {
+				await goto('/login');
+			}
+		} catch {
+			authState.set({ loading: false, setupRequired: false, user: null });
+		}
+	}
+
+	async function signOut() {
+		await logoutAndReset();
+		await goto('/login');
+	}
+
+	onMount(() => {
+		void syncAuth();
+	});
 </script>
 
 <svelte:head>
@@ -41,22 +79,38 @@
 				</div>
 			</div>
 			<nav class="flex flex-wrap items-center gap-3 text-sm font-medium text-stone-700">
-				<a class="nav-link" href="/">
-					<Radar class="h-4 w-4" />
-					<span>Request Radar</span>
-				</a>
 				<a class="nav-link" href="/requests/new">
 					<Compass class="h-4 w-4" />
-					<span>Metadata Wizard</span>
+					<span>Request Books</span>
 				</a>
-				<a class="nav-link" href="/library/scan">
-					<ScanLine class="h-4 w-4" />
-					<span>Library Scan</span>
-				</a>
-				<a class="nav-link" href="/settings">
-					<SlidersHorizontal class="h-4 w-4" />
-					<span>Settings</span>
-				</a>
+				{#if $authState.user}
+					<a class="nav-link" href="/my-requests">
+						<Radar class="h-4 w-4" />
+						<span>My Requests</span>
+					</a>
+					{#if $authState.user.role === 'admin'}
+						<a class="nav-link" href="/">
+							<Shield class="h-4 w-4" />
+							<span>Admin Queue</span>
+						</a>
+						<a class="nav-link" href="/library/scan">
+							<ScanLine class="h-4 w-4" />
+							<span>Library Scan</span>
+						</a>
+						<a class="nav-link" href="/settings">
+							<SlidersHorizontal class="h-4 w-4" />
+							<span>Settings</span>
+						</a>
+						<a class="nav-link" href="/users">
+							<Users class="h-4 w-4" />
+							<span>Users</span>
+						</a>
+					{/if}
+					<button class="nav-link" onclick={signOut} type="button">
+						<LogOut class="h-4 w-4" />
+						<span>Logout</span>
+					</button>
+				{/if}
 			</nav>
 		</header>
 

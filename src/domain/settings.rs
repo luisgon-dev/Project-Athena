@@ -21,6 +21,15 @@ pub enum AudiobookLayoutPreset {
     Title,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NotificationTargetKind {
+    #[default]
+    Webhook,
+    Ntfy,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct StorageSettingsRecord {
@@ -80,6 +89,7 @@ pub struct ProwlarrIntegrationRecord {
     pub sync_enabled: bool,
     pub base_url: String,
     pub has_api_key: bool,
+    pub selected_indexer_ids: Vec<i32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -89,6 +99,7 @@ pub struct ProwlarrIntegrationUpdate {
     pub sync_enabled: Option<bool>,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
+    pub selected_indexer_ids: Option<Vec<i32>>,
     #[serde(default)]
     pub clear_api_key: bool,
 }
@@ -100,6 +111,7 @@ pub struct AudiobookshelfIntegrationRecord {
     pub base_url: String,
     pub library_id: String,
     pub has_api_key: bool,
+    pub mark_existing_during_search: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -109,8 +121,31 @@ pub struct AudiobookshelfIntegrationUpdate {
     pub base_url: Option<String>,
     pub library_id: Option<String>,
     pub api_key: Option<String>,
+    pub mark_existing_during_search: Option<bool>,
     #[serde(default)]
     pub clear_api_key: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NotificationSettingsRecord {
+    pub enabled: bool,
+    pub target_kind: NotificationTargetKind,
+    pub target_url: String,
+    pub has_auth_token: bool,
+    pub auth_header: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NotificationSettingsUpdate {
+    pub enabled: Option<bool>,
+    pub target_kind: Option<NotificationTargetKind>,
+    pub target_url: Option<String>,
+    pub auth_token: Option<String>,
+    pub auth_header: Option<String>,
+    #[serde(default)]
+    pub clear_auth_token: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -186,6 +221,7 @@ pub struct RuntimeSettingsRecord {
     pub integrations: IntegrationSettingsRecord,
     pub import: ImportSettingsRecord,
     pub acquisition: AcquisitionSettingsRecord,
+    pub notifications: NotificationSettingsRecord,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
@@ -197,6 +233,7 @@ pub struct RuntimeSettingsUpdate {
     pub integrations: Option<IntegrationSettingsUpdate>,
     pub import: Option<ImportSettingsUpdate>,
     pub acquisition: Option<AcquisitionSettingsUpdate>,
+    pub notifications: Option<NotificationSettingsUpdate>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -236,6 +273,8 @@ pub struct PersistedProwlarrIntegrationSettings {
     pub sync_enabled: bool,
     pub base_url: String,
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub selected_indexer_ids: Vec<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,6 +283,8 @@ pub struct PersistedAudiobookshelfIntegrationSettings {
     pub base_url: String,
     pub library_id: String,
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub mark_existing_during_search: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -266,6 +307,16 @@ pub struct PersistedAcquisitionSettings {
     pub blocked_terms: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersistedNotificationSettings {
+    pub enabled: bool,
+    #[serde(default)]
+    pub target_kind: NotificationTargetKind,
+    pub target_url: String,
+    pub auth_token: Option<String>,
+    pub auth_header: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PersistedRuntimeSettings {
     pub storage: StorageSettingsRecord,
@@ -274,6 +325,7 @@ pub struct PersistedRuntimeSettings {
     pub integrations: PersistedIntegrationSettings,
     pub import: PersistedImportSettings,
     pub acquisition: PersistedAcquisitionSettings,
+    pub notifications: PersistedNotificationSettings,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,12 +374,14 @@ impl PersistedRuntimeSettings {
                     sync_enabled: false,
                     base_url: String::new(),
                     api_key: None,
+                    selected_indexer_ids: Vec::new(),
                 },
                 audiobookshelf: PersistedAudiobookshelfIntegrationSettings {
                     enabled: false,
                     base_url: String::new(),
                     library_id: String::new(),
                     api_key: None,
+                    mark_existing_during_search: false,
                 },
             },
             import: PersistedImportSettings {
@@ -342,6 +396,13 @@ impl PersistedRuntimeSettings {
                 auto_acquire_score: 0.93,
                 preferred_language: None,
                 blocked_terms: Vec::new(),
+            },
+            notifications: PersistedNotificationSettings {
+                enabled: false,
+                target_kind: NotificationTargetKind::Webhook,
+                target_url: String::new(),
+                auth_token: None,
+                auth_header: None,
             },
         }
     }
@@ -370,12 +431,17 @@ impl PersistedRuntimeSettings {
                     sync_enabled: self.integrations.prowlarr.sync_enabled,
                     base_url: self.integrations.prowlarr.base_url.clone(),
                     has_api_key: self.integrations.prowlarr.api_key.is_some(),
+                    selected_indexer_ids: self.integrations.prowlarr.selected_indexer_ids.clone(),
                 },
                 audiobookshelf: AudiobookshelfIntegrationRecord {
                     enabled: self.integrations.audiobookshelf.enabled,
                     base_url: self.integrations.audiobookshelf.base_url.clone(),
                     library_id: self.integrations.audiobookshelf.library_id.clone(),
                     has_api_key: self.integrations.audiobookshelf.api_key.is_some(),
+                    mark_existing_during_search: self
+                        .integrations
+                        .audiobookshelf
+                        .mark_existing_during_search,
                 },
             },
             import: ImportSettingsRecord {
@@ -390,6 +456,13 @@ impl PersistedRuntimeSettings {
                 auto_acquire_score: self.acquisition.auto_acquire_score,
                 preferred_language: self.acquisition.preferred_language.clone(),
                 blocked_terms: self.acquisition.blocked_terms.clone(),
+            },
+            notifications: NotificationSettingsRecord {
+                enabled: self.notifications.enabled,
+                target_kind: self.notifications.target_kind.clone(),
+                target_url: self.notifications.target_url.clone(),
+                has_auth_token: self.notifications.auth_token.is_some(),
+                auth_header: self.notifications.auth_header.clone(),
             },
         }
     }
@@ -453,6 +526,9 @@ impl PersistedRuntimeSettings {
                 if let Some(value) = prowlarr.base_url {
                     self.integrations.prowlarr.base_url = value;
                 }
+                if let Some(value) = prowlarr.selected_indexer_ids {
+                    self.integrations.prowlarr.selected_indexer_ids = value;
+                }
                 if prowlarr.clear_api_key {
                     self.integrations.prowlarr.api_key = None;
                 } else if let Some(value) = prowlarr.api_key {
@@ -473,6 +549,9 @@ impl PersistedRuntimeSettings {
                 }
                 if let Some(value) = audiobookshelf.library_id {
                     self.integrations.audiobookshelf.library_id = value;
+                }
+                if let Some(value) = audiobookshelf.mark_existing_during_search {
+                    self.integrations.audiobookshelf.mark_existing_during_search = value;
                 }
                 if audiobookshelf.clear_api_key {
                     self.integrations.audiobookshelf.api_key = None;
@@ -518,6 +597,27 @@ impl PersistedRuntimeSettings {
                 self.acquisition.blocked_terms = value;
             }
         }
+
+        if let Some(notifications) = update.notifications {
+            if let Some(value) = notifications.enabled {
+                self.notifications.enabled = value;
+            }
+            if let Some(value) = notifications.target_kind {
+                self.notifications.target_kind = value;
+            }
+            if let Some(value) = notifications.target_url {
+                self.notifications.target_url = value;
+            }
+            if let Some(value) = notifications.auth_header {
+                self.notifications.auth_header = normalize_optional_text(Some(value));
+            }
+            if notifications.clear_auth_token {
+                self.notifications.auth_token = None;
+            } else if let Some(value) = notifications.auth_token {
+                self.notifications.auth_token = normalize_optional_text(Some(value))
+                    .or_else(|| self.notifications.auth_token.clone());
+            }
+        }
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -540,6 +640,10 @@ impl PersistedRuntimeSettings {
         let prowlarr = &self.integrations.prowlarr;
         if prowlarr.enabled || prowlarr.sync_enabled {
             validate_url(&prowlarr.base_url, "Prowlarr base url")?;
+            validate_non_negative_ids(
+                &prowlarr.selected_indexer_ids,
+                "Prowlarr selected indexer ids",
+            )?;
             if prowlarr
                 .api_key
                 .as_deref()
@@ -593,6 +697,13 @@ impl PersistedRuntimeSettings {
             anyhow::bail!("auto acquire score must be greater than or equal to minimum score");
         }
 
+        if self.notifications.enabled {
+            validate_url(&self.notifications.target_url, "notification target url")?;
+            if let Some(header) = &self.notifications.auth_header {
+                require_non_empty(header, "notification auth header")?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -643,6 +754,14 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn validate_non_negative_ids(values: &[i32], label: &str) -> anyhow::Result<()> {
+    if values.iter().any(|value| *value <= 0) {
+        anyhow::bail!("{label} must contain only positive ids");
+    }
+
+    Ok(())
 }
 
 fn default_ebook_naming_template() -> String {

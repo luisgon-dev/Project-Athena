@@ -147,13 +147,15 @@ function runtimeSettings() {
 				enabled: true,
 				sync_enabled: true,
 				base_url: 'http://localhost:9696',
-				has_api_key: true
+				has_api_key: true,
+				selected_indexer_ids: [42]
 			},
 			audiobookshelf: {
 				enabled: true,
 				base_url: 'http://localhost:13378',
 				library_id: 'library-1',
-				has_api_key: true
+				has_api_key: true,
+				mark_existing_during_search: true
 			}
 		},
 		import: {
@@ -168,6 +170,13 @@ function runtimeSettings() {
 			auto_acquire_score: 0.93,
 			preferred_language: 'en',
 			blocked_terms: ['abridged']
+		},
+		notifications: {
+			enabled: false,
+			target_kind: 'webhook',
+			target_url: '',
+			has_auth_token: false,
+			auth_header: null
 		}
 	};
 }
@@ -208,6 +217,17 @@ const defaultSearchResults = {
 
 function defaultResponder(method: string, pathname: string): MockResponder | undefined {
 	switch (`${method} ${pathname}`) {
+		case 'GET /api/v1/auth/bootstrap':
+			return {
+				body: {
+					setup_required: false,
+					authenticated_user: {
+						id: 'admin-1',
+						username: 'admin',
+						role: 'admin'
+					}
+				}
+			};
 		case 'GET /api/v1/requests':
 			return { body: defaultRequests };
 		case 'GET /api/v1/requests/search':

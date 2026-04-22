@@ -8,6 +8,7 @@ pub mod importer;
 pub mod library_scanner;
 pub mod matcher;
 pub mod metadata;
+pub mod notifications;
 pub mod search;
 pub mod sync;
 pub mod workers;

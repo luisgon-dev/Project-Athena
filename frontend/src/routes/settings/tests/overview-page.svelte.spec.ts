@@ -37,7 +37,8 @@ describe('settings overview page', () => {
 									enabled: true,
 									sync_enabled: true,
 									base_url: 'http://localhost:9696',
-									has_api_key: true
+									has_api_key: true,
+									selected_indexer_ids: [12]
 								}
 							},
 							import: {

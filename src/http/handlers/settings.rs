@@ -1,30 +1,38 @@
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+};
 
 use crate::{
     app::AppState,
     domain::settings::{
         AcquisitionSettingsRecord, AcquisitionSettingsUpdate, AudiobookshelfIntegrationRecord,
         AudiobookshelfIntegrationUpdate, ConnectionTestResult, ImportSettingsRecord,
-        ImportSettingsUpdate, PersistedRuntimeSettings, ProwlarrIntegrationRecord,
-        ProwlarrIntegrationUpdate, QbittorrentSettingsRecord, QbittorrentSettingsUpdate,
-        RuntimeSettingsRecord, RuntimeSettingsUpdate, StorageSettingsRecord, StorageSettingsUpdate,
-        SyncedIndexerRecord,
+        ImportSettingsUpdate, NotificationSettingsRecord, NotificationSettingsUpdate,
+        PersistedRuntimeSettings, ProwlarrIntegrationRecord, ProwlarrIntegrationUpdate,
+        QbittorrentSettingsRecord, QbittorrentSettingsUpdate, RuntimeSettingsRecord,
+        RuntimeSettingsUpdate, StorageSettingsRecord, StorageSettingsUpdate, SyncedIndexerRecord,
     },
     downloads::qbittorrent::QbittorrentClient,
-    http::error::AppError,
+    http::{auth::require_admin, error::AppError},
     sync::audiobookshelf::AudiobookshelfClient,
 };
 
 pub async fn get_runtime_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<RuntimeSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(state.settings.get_runtime_settings().await?))
 }
 
 pub async fn update_runtime_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<RuntimeSettingsUpdate>,
 ) -> Result<Json<RuntimeSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(
         state
             .settings
@@ -36,14 +44,18 @@ pub async fn update_runtime_settings(
 
 pub async fn get_storage_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<StorageSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(state.settings.get_runtime_settings().await?.storage))
 }
 
 pub async fn update_storage_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<StorageSettingsUpdate>,
 ) -> Result<Json<StorageSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     let settings = state
         .settings
         .update_runtime_settings(RuntimeSettingsUpdate {
@@ -57,14 +69,18 @@ pub async fn update_storage_settings(
 
 pub async fn get_import_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<ImportSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(state.settings.get_runtime_settings().await?.import))
 }
 
 pub async fn update_import_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<ImportSettingsUpdate>,
 ) -> Result<Json<ImportSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     let settings = state
         .settings
         .update_runtime_settings(RuntimeSettingsUpdate {
@@ -78,7 +94,9 @@ pub async fn update_import_settings(
 
 pub async fn get_acquisition_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<AcquisitionSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(
         state.settings.get_runtime_settings().await?.acquisition,
     ))
@@ -86,8 +104,10 @@ pub async fn get_acquisition_settings(
 
 pub async fn update_acquisition_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<AcquisitionSettingsUpdate>,
 ) -> Result<Json<AcquisitionSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     let settings = state
         .settings
         .update_runtime_settings(RuntimeSettingsUpdate {
@@ -101,7 +121,9 @@ pub async fn update_acquisition_settings(
 
 pub async fn get_qbittorrent_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<QbittorrentSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(
         state
             .settings
@@ -114,8 +136,10 @@ pub async fn get_qbittorrent_settings(
 
 pub async fn update_qbittorrent_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<QbittorrentSettingsUpdate>,
 ) -> Result<Json<QbittorrentSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     let settings = state
         .settings
         .update_runtime_settings(RuntimeSettingsUpdate {
@@ -131,8 +155,10 @@ pub async fn update_qbittorrent_settings(
 
 pub async fn test_qbittorrent_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<QbittorrentSettingsUpdate>,
 ) -> Result<(StatusCode, Json<ConnectionTestResult>), AppError> {
+    require_admin(&state, &headers).await?;
     let settings = preview_settings(
         &state,
         RuntimeSettingsUpdate {
@@ -169,7 +195,9 @@ pub async fn test_qbittorrent_settings(
 
 pub async fn get_prowlarr_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<ProwlarrIntegrationRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(
         state
             .settings
@@ -182,8 +210,10 @@ pub async fn get_prowlarr_settings(
 
 pub async fn update_prowlarr_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<ProwlarrIntegrationUpdate>,
 ) -> Result<Json<ProwlarrIntegrationRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     let settings = state
         .settings
         .update_runtime_settings(RuntimeSettingsUpdate {
@@ -200,7 +230,9 @@ pub async fn update_prowlarr_settings(
 
 pub async fn get_audiobookshelf_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<AudiobookshelfIntegrationRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(
         state
             .settings
@@ -213,8 +245,10 @@ pub async fn get_audiobookshelf_settings(
 
 pub async fn update_audiobookshelf_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<AudiobookshelfIntegrationUpdate>,
 ) -> Result<Json<AudiobookshelfIntegrationRecord>, AppError> {
+    require_admin(&state, &headers).await?;
     let settings = state
         .settings
         .update_runtime_settings(RuntimeSettingsUpdate {
@@ -231,8 +265,10 @@ pub async fn update_audiobookshelf_settings(
 
 pub async fn test_prowlarr_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<ProwlarrIntegrationUpdate>,
 ) -> Result<(StatusCode, Json<ConnectionTestResult>), AppError> {
+    require_admin(&state, &headers).await?;
     let settings = preview_settings(
         &state,
         RuntimeSettingsUpdate {
@@ -285,14 +321,18 @@ pub async fn test_prowlarr_settings(
 
 pub async fn list_synced_indexers(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<SyncedIndexerRecord>>, AppError> {
+    require_admin(&state, &headers).await?;
     Ok(Json(state.settings.list_synced_indexers().await?))
 }
 
 pub async fn test_audiobookshelf_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<AudiobookshelfIntegrationUpdate>,
 ) -> Result<(StatusCode, Json<ConnectionTestResult>), AppError> {
+    require_admin(&state, &headers).await?;
     let settings = preview_settings(
         &state,
         RuntimeSettingsUpdate {
@@ -335,6 +375,31 @@ pub async fn test_audiobookshelf_settings(
             message: "Audiobookshelf connection succeeded".to_string(),
         }),
     ))
+}
+
+pub async fn get_notifications_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<NotificationSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
+    Ok(Json(state.settings.get_runtime_settings().await?.notifications))
+}
+
+pub async fn update_notifications_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<NotificationSettingsUpdate>,
+) -> Result<Json<NotificationSettingsRecord>, AppError> {
+    require_admin(&state, &headers).await?;
+    let settings = state
+        .settings
+        .update_runtime_settings(RuntimeSettingsUpdate {
+            notifications: Some(payload),
+            ..RuntimeSettingsUpdate::default()
+        })
+        .await
+        .map_err(map_settings_error)?;
+    Ok(Json(settings.notifications))
 }
 
 async fn preview_settings(

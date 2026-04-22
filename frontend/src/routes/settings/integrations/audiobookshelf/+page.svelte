@@ -20,6 +20,7 @@
 	let hasApiKey = $state(false);
 	let apiKey = $state('');
 	let clearApiKey = $state(false);
+	let markExistingDuringSearch = $state(false);
 
 	async function loadSettings() {
 		loading = true;
@@ -31,6 +32,7 @@
 			baseUrl = settings.base_url;
 			libraryId = settings.library_id;
 			hasApiKey = settings.has_api_key;
+			markExistingDuringSearch = settings.mark_existing_during_search;
 			apiKey = '';
 			clearApiKey = false;
 		} catch (loadError) {
@@ -49,6 +51,7 @@
 			base_url: baseUrl,
 			library_id: libraryId,
 			api_key: apiKey || null,
+			mark_existing_during_search: markExistingDuringSearch,
 			clear_api_key: clearApiKey
 		};
 	}
@@ -106,7 +109,8 @@
 		<h1 class="mt-3 font-serif text-3xl text-stone-950">Audiobookshelf</h1>
 		<p class="mt-2 max-w-3xl text-sm leading-6 text-stone-600">
 			Athena uses Audiobookshelf only after an audiobook import succeeds. Save the service URL,
-			target library, and API key so the download worker can trigger a library scan on sync.
+			target library, and API key so the download worker can trigger a library scan on sync and
+			optionally mark existing titles during requester search.
 		</p>
 	</div>
 
@@ -150,6 +154,12 @@
 					<input bind:checked={clearApiKey} class="h-4 w-4" type="checkbox" />
 					<span class="text-sm text-stone-700">
 						Clear saved API key {hasApiKey ? '(key currently stored)' : '(no key stored)'}
+					</span>
+				</label>
+				<label class="flex items-center gap-3 rounded-[1.35rem] bg-stone-100/90 px-4 py-4 md:col-span-2">
+					<input bind:checked={markExistingDuringSearch} class="h-4 w-4" type="checkbox" />
+					<span class="text-sm text-stone-700">
+						Use Audiobookshelf to mark existing audiobook matches during requester search
 					</span>
 				</label>
 				<div class="rounded-[1.35rem] bg-stone-100/90 px-4 py-4 text-sm text-stone-600">

@@ -41,6 +41,10 @@ async fn runtime_settings_are_seeded_from_bootstrap_config() {
         body["download_clients"]["qbittorrent"]["has_password"],
         false
     );
+    assert_eq!(
+        body["integrations"]["prowlarr"]["selected_indexer_ids"],
+        json!([])
+    );
     assert_eq!(body["import"]["ebook_import_mode"], "managed");
     assert_eq!(body["import"]["ebook_passthrough_root"], Value::Null);
     assert_eq!(
